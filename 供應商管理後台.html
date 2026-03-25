@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>供應商管理後台</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+* { box-sizing: border-box; }
+body { margin: 0; font-family: 'Microsoft JhengHei', 'Segoe UI', sans-serif; }
+@media print { .no-print { display: none !important; } .print-only { display: block !important; } }
+.print-only { display: none; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
+
+const ORDER_STATUSES = [
+  { id:'pending',    label:'待確認',     bg:'#fef9c3', color:'#854d0e' },
+  { id:'confirmed',  label:'已確認',     bg:'#dbeafe', color:'#1e40af' },
+  { id:'assigned',   label:'已派案',     bg:'#e0e7ff', color:'#3730a3' },
+  { id:'scheduling', label:'排程中',     bg:'#fce7f3', color:'#9d174d' },
+  { id:'inProgress', label:'進行中',     bg:'#d1fae5', color:'#065f46' },
+  { id:'completed',  label:'已完成',     bg:'#dcfce7', color:'#166534' },
+  { id:'cancelled',  label:'已取消',     bg:'#fee2e2', color:'#991b1b' },
+  { id:'onHold',     label:'暫停',       bg:'#f3f4f6', color:'#374151' },
+  { id:'invoiced',   label:'已開立發票', bg:'#ffedd5', color:'#9a3412' },
+  { id:'paid',       label:'已付款',     bg:'#d1fae5', color:'#065f46' },
+  { id:'disputed',   label:'爭議中',     bg:'#fef3c7', color:'#92400e' },
+  { id:'refunded',   label:'已退款',     bg:'#ede9fe', color:'#5b21b6' },
+];
+const STATUS_MAP = Object.fromEntries(ORDER_STATUSES.map(s=>[s.id,s]));
+const REGIONS = ['台北市','新北市','桃園市','台中市','台南市','高雄市','基隆市','新竹市','嘉義市','新竹縣','苗栗縣','彰化縣','南投縣','雲林縣','嘉義縣','屏東縣','宜蘭縣','花蓮縣','台東縣'];
+const EMOJIS = ['😊','😂','🥰','😎','🤔','👍','👏','🎉','🎊','✅','❌','⚠️','📝','📋','📌','🔔','💡','🔧','🏠','🧹','🧺','🛠️','💰','💳','📅','⏰','🚗','📞','✉️','🔑','⭐','❤️','🌟','💯','🙏','👋','🤝','💪','🎯','📊','📈','🗓️','📁','🗂️','💼','🧑‍🔧','👩‍💼','👨‍💼','🏢'];
+const PRODUCT_CATEGORIES = ['整理收納','清潔除蟲','搬家清運','局部修繕','其他'];
+
+const gm = (p) => {
+  if (!p||!p.retailPrice||p.retailPrice===0) return '0.0';
+  const cost = p.profitMode==='commission' ? (p.retailPrice-(p.commissionAmount||0)) : (p.purchasePrice||0);
+  return ((p.retailPrice-cost)/p.retailPrice*100).toFixed(1);
+};
+const gmStyle = (m) => {
+  const v=parseFloat(m);
+  if (v>=40) return {background:'#dcfce7',color:'#166534'};
+  if (v>=25) return {background:'#fef9c3',color:'#92400e'};
+  return {background:'#fee2e2',color:'#991b1b'};
+};
+const profitCalc = (p) => {
+  if(!p||!p.retailPrice) return {toVendor:0,ourProfit:0};
+  const toVendor = p.profitMode==='commission' ? (p.retailPrice-(p.commissionAmount||0)) : (p.purchasePrice||0);
+  return {toVendor, ourProfit: p.retailPrice - toVendor};
+};
+const mkId = (pfx) => pfx+'_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
+const mkTaskId = () => 'task_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
+
+const INIT_GLOBAL_PRODUCTS = [
+  { id:'gp1',  category:'整理收納', name:'輕享受方案-整理收納×1', retailPrice:2800, purchasePrice:1680, commissionAmount:0,  profitMode:'price',      vendorId:'v1', note:'適合單一空間' },
+  { id:'gp1b', category:'整理收納', name:'輕享受方案-整理收納×1', retailPrice:2800, purchasePrice:1960, commissionAmount:0,  profitMode:'price',      vendorId:'v2', note:'清潔達人版' },
+  { id:'gp2',  category:'整理收納', name:'輕享受方案-整理收納×2', retailPrice:5200, purchasePrice:3120, commissionAmount:0,  profitMode:'price',      vendorId:'v1', note:'適合兩個空間' },
+  { id:'gp3',  category:'整理收納', name:'深度整理方案',           retailPrice:8800, purchasePrice:5280, commissionAmount:0,  profitMode:'price',      vendorId:'v1', note:'全屋深度整理' },
+  { id:'gp4',  category:'清潔除蟲', name:'居家深層清潔',           retailPrice:3500, purchasePrice:2100, commissionAmount:0,  profitMode:'price',      vendorId:'v2', note:'' },
+  { id:'gp5',  category:'清潔除蟲', name:'除蟲防治服務',           retailPrice:2000, purchasePrice:0,    commissionAmount:400,profitMode:'commission', vendorId:'v2', note:'含藥劑費用' },
+  { id:'gp6',  category:'清潔除蟲', name:'冷氣清洗',               retailPrice:800,  purchasePrice:480,  commissionAmount:0,  profitMode:'price',      vendorId:'v2', note:'單台' },
+  { id:'gp7',  category:'搬家清運', name:'一般搬家服務',           retailPrice:5000, purchasePrice:3000, commissionAmount:0,  profitMode:'price',      vendorId:'v1', note:'含基本打包' },
+  { id:'gp8',  category:'搬家清運', name:'清運廢棄物',             retailPrice:2500, purchasePrice:0,    commissionAmount:500,profitMode:'commission', vendorId:'v1', note:'以重量計' },
+  { id:'gp9',  category:'局部修繕', name:'水電修繕',               retailPrice:1500, purchasePrice:900,  commissionAmount:0,  profitMode:'price',      vendorId:'v3', note:'基本工資' },
+  { id:'gp10', category:'局部修繕', name:'油漆粉刷',               retailPrice:200,  purchasePrice:120,  commissionAmount:0,  profitMode:'price',      vendorId:'v3', note:'每平方公尺' },
+  { id:'gp11', category:'局部修繕', name:'地板修繕',               retailPrice:300,  purchasePrice:180,  commissionAmount:0,  profitMode:'price',      vendorId:'v3', note:'每平方公尺' },
+];
+
+const INIT_VENDORS = [
+  { id:'v1', name:'居家整聊股份有限公司', contact:'整聊服務顧問', phone:'0905-901-216', email:'sales@tidyman.tw',
+    taxId:'23456789', address:'台北市信義區信義路五段7號10樓',
+    bankName:'台灣銀行', bankAccount:'001-12345-678901',
+    contractStart:'2025/01/01', contractEnd:'2026/12/31', paymentTerms:'月結30天',
+    categories:['整理收納','搬家清運'], regions:['台北市','新北市','桃園市'],
+    status:'active', notes:[{id:'vn1',text:'2026/03 合約續約完成 ✅',createdAt:'2026/03/01 10:00'}] },
+  { id:'v2', name:'清潔達人有限公司', contact:'王經理', phone:'0912-345-678', email:'clean@example.tw',
+    taxId:'34567890', address:'新北市板橋區文化路二段200號',
+    bankName:'合作金庫', bankAccount:'006-23456-789012',
+    contractStart:'2025/06/01', contractEnd:'2026/05/31', paymentTerms:'月結60天',
+    categories:['清潔除蟲','整理收納'], regions:['新北市','桃園市','台中市'],
+    status:'active', notes:[] },
+  { id:'v3', name:'優質工程行', contact:'李師傅', phone:'0923-456-789', email:'fix@example.tw',
+    taxId:'45678901', address:'高雄市三民區建工路300號',
+    bankName:'第一銀行', bankAccount:'007-34567-890123',
+    contractStart:'2025/03/01', contractEnd:'2027/02/28', paymentTerms:'即期付款',
+    categories:['局部修繕'], regions:['高雄市','屏東縣','台南市'],
+    status:'active', notes:[] },
+];
+
+const INIT_CASE_HANDLERS = [
+  { id:'ch1', vendorId:'v1', name:'陳小明', phone:'0921-111-222', email:'chen@tidyman.tw',  productIds:['gp1','gp2'],         regions:['台北市','新北市'] },
+  { id:'ch2', vendorId:'v1', name:'林美華', phone:'0932-333-444', email:'lin@tidyman.tw',   productIds:['gp3','gp7'],         regions:['台北市','桃園市'] },
+  { id:'ch3', vendorId:'v2', name:'王大偉', phone:'0943-555-666', email:'wang@clean.tw',    productIds:['gp4','gp5'],         regions:['台中市','彰化縣'] },
+  { id:'ch4', vendorId:'v3', name:'李建國', phone:'0954-777-888', email:'li@fix.tw',        productIds:['gp9','gp10','gp11'], regions:['高雄市','屏東縣'] },
+];
+const INIT_SCHEDULES = {
+  ch1:{'2026/03/23':'available','2026/03/24':'available','2026/03/25':'available'},
+  ch2:{'2026/03/24':'available','2026/03/26':'available'},
+  ch3:{'2026/03/23':'available','2026/03/25':'available'},
+  ch4:{'2026/03/22':'available','2026/03/23':'available'},
+};
+const INIT_VENDOR_USERS = {
+  v1:[{id:'vu1',name:'管理員甲',email:'admin1@tidyman.tw',permissions:['all']},{id:'vu2',name:'業務乙',email:'staff1@tidyman.tw',permissions:['view','edit']}],
+  v2:[{id:'vu3',name:'管理員丙',email:'admin@clean.tw',permissions:['all']}],
+  v3:[{id:'vu4',name:'管理員丁',email:'admin@fix.tw',permissions:['all']}],
+};
+const INIT_ORDERS = [
+  { id:'o1',orderNo:'ORD-2026-001',status:'assigned',createdAt:'2026/03/01',source:'官網',paymentMethod:'信用卡',
+    customerName:'王小明',phone:'0912-345-678',email:'wang@example.com',taxId:'',invoiceTitle:'',
+    city:'台北市',district:'信義區',address:'信義路五段7號',vendorId:'v1',handlerId:'ch1',
+    tasks:[{id:'t1',sameAsCustomer:true,contactName:'',contactPhone:'',contactCity:'',contactDistrict:'',contactAddress:'',productId:'gp1',qty:1,unitPrice:2800,totalPrice:2800,startDate:'2026/03/23',startTime:'10:00',endDate:'2026/03/23',endTime:'15:00'}],
+    notes:[{id:'n1',text:'客戶希望重點整理書房 📚',createdAt:'2026/03/01 14:30'}] },
+  { id:'o2',orderNo:'ORD-2026-002',status:'pending',createdAt:'2026/03/05',source:'Line',paymentMethod:'匯款',
+    customerName:'陳美麗',phone:'0923-456-789',email:'chen@example.com',taxId:'12345678',invoiceTitle:'陳美麗工作室',
+    city:'新北市',district:'板橋區',address:'文化路一段100號',vendorId:'',handlerId:'',
+    tasks:[{id:'t2',sameAsCustomer:true,contactName:'',contactPhone:'',contactCity:'',contactDistrict:'',contactAddress:'',productId:'gp4',qty:1,unitPrice:3500,totalPrice:3500,startDate:'2026/03/28',startTime:'09:00',endDate:'2026/03/28',endTime:'12:00'}],
+    notes:[] },
+  { id:'o3',orderNo:'ORD-2026-003',status:'completed',createdAt:'2026/03/08',source:'電話',paymentMethod:'現金',
+    customerName:'李大華',phone:'0934-567-890',email:'',taxId:'',invoiceTitle:'',
+    city:'台中市',district:'西屯區',address:'台灣大道三段500號',vendorId:'v3',handlerId:'ch4',
+    tasks:[
+      {id:'t3',sameAsCustomer:false,contactName:'李太太',contactPhone:'0934-567-891',contactCity:'台中市',contactDistrict:'西屯區',contactAddress:'台灣大道三段500號',productId:'gp9',qty:2,unitPrice:1500,totalPrice:3000,startDate:'2026/03/10',startTime:'14:00',endDate:'2026/03/10',endTime:'17:00'},
+      {id:'t4',sameAsCustomer:true,contactName:'',contactPhone:'',contactCity:'',contactDistrict:'',contactAddress:'',productId:'gp11',qty:3,unitPrice:300,totalPrice:900,startDate:'2026/03/11',startTime:'09:00',endDate:'2026/03/11',endTime:'12:00'},
+    ],
+    notes:[{id:'n2',text:'客戶反饋滿意 ✅',createdAt:'2026/03/11 18:00'}] },
+];
+
+function LoginPage({onLogin}) {
+  const [mode,setMode]=useState('admin');const [vendorId,setVendorId]=useState('');const [password,setPassword]=useState('');const [error,setError]=useState('');
+  const handleLogin=()=>{if(mode==='admin'){if(password==='admin123')onLogin({role:'admin',vendorId:null});else setError('密碼錯誤，測試密碼：admin123');}else{if(!vendorId){setError('請選擇供應商');return;}if(password==='vendor123')onLogin({role:'vendor',vendorId});else setError('密碼錯誤，測試密碼：vendor123');}};
+  return (<div className="min-h-screen bg-gradient-to-br from-blue-600 to-blue-800 flex items-center justify-center"><div className="bg-white rounded-2xl shadow-2xl p-8 w-96"><h1 className="text-2xl font-bold text-center text-blue-700 mb-6">🏢 供應商管理後台</h1><div className="flex mb-6 bg-gray-100 rounded-lg p-1"><button onClick={()=>{setMode('admin');setError('');}} className={`flex-1 py-2 rounded-md text-sm font-medium ${mode==='admin'?'bg-white shadow text-blue-600':'text-gray-500'}`}>管理員登入</button><button onClick={()=>{setMode('vendor');setError('');}} className={`flex-1 py-2 rounded-md text-sm font-medium ${mode==='vendor'?'bg-white shadow text-blue-600':'text-gray-500'}`}>供應商登入</button></div>{mode==='vendor'&&(<div className="mb-4"><label className="text-sm font-medium text-gray-700 block mb-1">選擇供應商</label><select value={vendorId} onChange={e=>setVendorId(e.target.value)} className="w-full border border-gray-300 rounded px-3 py-2 text-sm"><option value="">-- 請選擇 --</option>{INIT_VENDORS.map(v=><option key={v.id} value={v.id}>{v.name}</option>)}</select></div>)}<div className="mb-4"><label className="text-sm font-medium text-gray-700 block mb-1">密碼</label><input type="password" value={password} onChange={e=>setPassword(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleLogin()} placeholder={mode==='admin'?'admin123':'vendor123'} className="w-full border border-gray-300 rounded px-3 py-2 text-sm"/></div>{error&&<div className="text-red-500 text-sm mb-4 bg-red-50 p-2 rounded">{error}</div>}<button onClick={handleLogin} className="w-full bg-blue-600 text-white py-2 rounded-lg font-medium hover:bg-blue-700">登入</button><div className="mt-4 text-xs text-gray-400 text-center">管理員密碼: admin123 ｜ 供應商密碼: vendor123</div></div></div>);
+}
+
+function App() {
+  const [auth,setAuth]=useState(null);const [tab,setTab]=useState('orders');
+  const [globalProducts,setGlobalProducts]=useState(INIT_GLOBAL_PRODUCTS);
+  const [vendors,setVendors]=useState(INIT_VENDORS);
+  const [caseHandlers,setCaseHandlers]=useState(INIT_CASE_HANDLERS);
+  const [schedules,setSchedules]=useState(INIT_SCHEDULES);
+  const [vendorUsers,setVendorUsers]=useState(INIT_VENDOR_USERS);
+  const [orders,setOrders]=useState(INIT_ORDERS);
+  if(!auth) return <LoginPage onLogin={setAuth}/>;
+  const activeVendors=vendors.filter(v=>v.status!=='inactive');
+  if(auth.role!=='admin'){
+    return <VendorPortal auth={auth} vendor={vendors.find(v=>v.id===auth.vendorId)} orders={orders.filter(o=>o.vendorId===auth.vendorId)} setOrders={setOrders} allOrders={orders} caseHandlers={caseHandlers.filter(ch=>ch.vendorId===auth.vendorId)} schedules={schedules} setSchedules={setSchedules} globalProducts={globalProducts} onLogout={()=>setAuth(null)}/>;
+  }
+  const NavBtn=({id,label})=><button onClick={()=>setTab(id)} className={`px-3 py-2 rounded text-left text-sm w-full ${tab===id?'bg-blue-800':'hover:bg-blue-500'}`}>{label}</button>;
+  return (
+    <div className="flex h-screen bg-gray-100">
+      <nav className="w-60 bg-blue-600 text-white p-4 flex flex-col gap-1 shrink-0">
+        <h1 className="text-lg font-bold mb-2 px-1">供應商管理後台</h1>
+        <NavBtn id="orders" label="📋 訂單管理"/>
+        <NavBtn id="assignment" label="👥 派案管理"/>
+        <div className="text-xs text-blue-300 uppercase tracking-wide px-1 mt-3 mb-1">供應商管理</div>
+        <div className="pl-2 flex flex-col gap-1">
+          <NavBtn id="vendors" label="🏢 供應商"/>
+          <NavBtn id="products" label="📦 產品列表"/>
+        </div>
+        <NavBtn id="handlers" label="🧑‍🔧 施工人員"/>
+        <NavBtn id="users" label="👤 廠商帳號"/>
+        <div className="mt-auto pt-4 border-t border-blue-500">
+          <button onClick={()=>setAuth(null)} className="px-3 py-2 rounded text-left text-sm hover:bg-blue-500 w-full">🚪 登出</button>
+        </div>
+      </nav>
+      <div className="flex-1 overflow-auto">
+        {tab==='orders'     && <OrdersPage orders={orders} setOrders={setOrders} vendors={activeVendors} globalProducts={globalProducts} caseHandlers={caseHandlers}/>}
+        {tab==='assignment' && <AssignmentPage orders={orders} setOrders={setOrders} vendors={activeVendors} caseHandlers={caseHandlers} globalProducts={globalProducts}/>}
+        {tab==='vendors'    && <VendorManagementPage vendors={vendors} setVendors={setVendors} globalProducts={globalProducts} orders={orders}/>}
+        {tab==='products'   && <ProductsPage globalProducts={globalProducts} setGlobalProducts={setGlobalProducts} vendors={vendors}/>}
+        {tab==='handlers'   && <HandlersPage caseHandlers={caseHandlers} setCaseHandlers={setCaseHandlers} vendors={vendors} schedules={schedules} setSchedules={setSchedules} globalProducts={globalProducts}/>}
+        {tab==='users'      && <UsersPage vendorUsers={vendorUsers} setVendorUsers={setVendorUsers} vendors={vendors}/>}
+      </div>
+    </div>
+  );
+}
+
+function Input({label,value,onChange,type='text',placeholder=''}) {
+  return (<div className="flex flex-col gap-1">{label&&<label className="text-sm font-medium text-gray-700">{label}</label>}<input type={type} value={value||''} onChange={e=>onChange(e.target.value)} placeholder={placeholder} className="border border-gray-300 rounded px-3 py-2 text-sm"/></div>);
+}
+function Select({label,value,onChange,options=[]}) {
+  return (<div className="flex flex-col gap-1">{label&&<label className="text-sm font-medium text-gray-700">{label}</label>}<select value={value} onChange={e=>onChange(e.target.value)} className="border border-gray-300 rounded px-3 py-2 text-sm"><option value="">-- 全部 --</option>{options.map(opt=><option key={opt.id} value={opt.id}>{opt.label}</option>)}</select></div>);
+}
+function EmojiPicker({onSelect}) {
+  const [open,setOpen]=useState(false);const ref=useRef(null);
+  useEffect(()=>{const h=(e)=>{if(ref.current&&!ref.current.contains(e.target))setOpen(false);};document.addEventListener('mousedown',h);return()=>document.removeEventListener('mousedown',h);},[]);
+  return (<div className="relative inline-block" ref={ref}><button type="button" onClick={()=>setOpen(!open)} className="px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded text-sm border border-gray-300">😊</button>{open&&(<div className="absolute bottom-9 left-0 bg-white border border-gray-300 rounded shadow-xl z-50 p-2 w-72"><div className="grid grid-cols-10 gap-1">{EMOJIS.map(e=>(<button key={e} type="button" onClick={()=>{onSelect(e);setOpen(false);}} className="text-lg hover:bg-gray-100 rounded p-0.5">{e}</button>))}</div></div>)}</div>);
+}
+function ProductComboBox({globalProducts,value,onChange}) {
+  const [open,setOpen]=useState(false);const ref=useRef(null);
+  useEffect(()=>{const h=(e)=>{if(ref.current&&!ref.current.contains(e.target))setOpen(false);};document.addEventListener('mousedown',h);return()=>document.removeEventListener('mousedown',h);},[]);
+  const selected=globalProducts.find(p=>p.id===value);
+  const display=selected?`[${selected.category}] ${selected.name} — NT$${selected.retailPrice}`:'選擇商品';
+  return (<div className="relative" ref={ref}><button type="button" onClick={()=>setOpen(!open)} className="border border-gray-300 rounded px-3 py-2 w-full text-left text-sm bg-white truncate">{display}</button>{open&&(<div className="absolute top-10 left-0 right-0 bg-white border border-gray-300 rounded shadow-lg z-50 max-h-64 overflow-y-auto">{globalProducts.map(p=>{const m=gm(p);return(<button type="button" key={p.id} onClick={()=>{onChange(p.id);setOpen(false);}} className="w-full text-left px-3 py-2 hover:bg-blue-50 text-sm flex justify-between items-center gap-2"><span className="truncate">[{p.category}] {p.name} — NT${p.retailPrice}</span><span style={gmStyle(m)} className="px-2 py-0.5 rounded text-xs shrink-0">{m}%</span></button>);})}</div>)}</div>);
+}
+
+function OrdersPage({orders,setOrders,vendors,globalProducts,caseHandlers}) {
+  const [filters,setFilters]=useState({vendor:'',dateFrom:'',dateTo:'',source:'',paymentMethod:'',status:''});
+  const [expandedId,setExpandedId]=useState(null);const [editingId,setEditingId]=useState(null);const [editData,setEditData]=useState(null);const [creating,setCreating]=useState(false);const [quotePrintOrder,setQuotePrintOrder]=useState(null);
+  const filtered=orders.filter(o=>{if(filters.vendor&&o.vendorId!==filters.vendor)return false;if(filters.dateFrom&&o.createdAt<filters.dateFrom.replace(/-/g,'/'))return false;if(filters.dateTo&&o.createdAt>filters.dateTo.replace(/-/g,'/'))return false;if(filters.source&&o.source!==filters.source)return false;if(filters.paymentMethod&&o.paymentMethod!==filters.paymentMethod)return false;if(filters.status&&o.status!==filters.status)return false;return true;});
+  const sourcesSet=[...new Set(orders.map(o=>o.source))];const methodsSet=[...new Set(orders.map(o=>o.paymentMethod))];
+  const startEdit=(order)=>{setEditingId(order.id);setEditData(JSON.parse(JSON.stringify(order)));};
+  const saveEdit=()=>{if(editData){setOrders(orders.map(o=>o.id===editingId?editData:o));setEditingId(null);setEditData(null);}};
+  const createOrder=(newOrder)=>{setOrders([...orders,newOrder]);setCreating(false);};
+  if(quotePrintOrder) return <QuotePrintView order={quotePrintOrder} globalProducts={globalProducts} vendors={vendors} onBack={()=>setQuotePrintOrder(null)}/>;
+  return (
+    <div className="p-6">
+      <div className="flex justify-between items-center mb-4"><h2 className="text-2xl font-bold">📋 訂單管理</h2><button onClick={()=>setCreating(!creating)} className="bg-green-500 text-white px-4 py-2 rounded text-sm">＋ 新增訂單</button></div>
+      {creating&&(<div className="bg-green-50 p-4 rounded shadow mb-6"><div className="font-bold mb-3 text-lg">新增訂單</div><OrderCreateForm vendors={vendors} globalProducts={globalProducts} caseHandlers={caseHandlers} onSave={createOrder} onCancel={()=>setCreating(false)} existingCount={orders.length}/></div>)}
+      <div className="bg-white p-4 rounded shadow mb-6"><div className="grid grid-cols-3 gap-4 mb-3"><Select label="供應商" value={filters.vendor} onChange={v=>setFilters({...filters,vendor:v})} options={vendors.map(v=>({id:v.id,label:v.name}))}/><Input label="起日期" type="date" value={filters.dateFrom} onChange={v=>setFilters({...filters,dateFrom:v})}/><Input label="迄日期" type="date" value={filters.dateTo} onChange={v=>setFilters({...filters,dateTo:v})}/></div><div className="grid grid-cols-3 gap-4"><Select label="來源" value={filters.source} onChange={v=>setFilters({...filters,source:v})} options={sourcesSet.map(s=>({id:s,label:s}))}/><Select label="付款方式" value={filters.paymentMethod} onChange={v=>setFilters({...filters,paymentMethod:v})} options={methodsSet.map(m=>({id:m,label:m}))}/><Select label="狀態" value={filters.status} onChange={v=>setFilters({...filters,status:v})} options={ORDER_STATUSES.map(s=>({id:s.id,label:s.label}))}/></div></div>
+      <div className="bg-white rounded shadow">
+        {filtered.length===0&&<div className="p-8 text-center text-gray-400">無符合條件的訂單</div>}
+        {filtered.map(order=>(
+          <div key={order.id} className="border-b last:border-0">
+            <div onClick={()=>setExpandedId(expandedId===order.id?null:order.id)} className="cursor-pointer flex justify-between items-center p-4 hover:bg-gray-50">
+              <div><div className="font-bold">{order.orderNo} — {order.customerName}</div><div className="text-sm text-gray-500">{order.createdAt} | {order.source} | {order.paymentMethod} | {order.city}{order.district}</div></div>
+              <div className="flex items-center gap-2"><span style={{background:STATUS_MAP[order.status]?.bg||'#f3f4f6',color:STATUS_MAP[order.status]?.color||'#374151'}} className="px-3 py-1 rounded text-sm font-medium">{STATUS_MAP[order.status]?.label||order.status}</span><span className="text-gray-400 text-sm">{expandedId===order.id?'▼':'▶'}</span></div>
+            </div>
+            {expandedId===order.id&&(<div className="bg-gray-50 p-4 border-t">{editingId===order.id?<OrderEditForm order={editData} setEditData={setEditData} onSave={saveEdit} onCancel={()=>setEditingId(null)} vendors={vendors} globalProducts={globalProducts} caseHandlers={caseHandlers}/>:<OrderDetailView order={order} vendors={vendors} globalProducts={globalProducts} caseHandlers={caseHandlers} onEdit={()=>startEdit(order)} onQuote={()=>setQuotePrintOrder(order)} setOrders={setOrders} orders={orders}/>}</div>)}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+function OrderDetailView({order,vendors,globalProducts,caseHandlers,onEdit,onQuote,setOrders,orders}) {
+  const [noteText,setNoteText]=useState('');const textareaRef=useRef(null);
+  const addNote=()=>{if(!noteText.trim())return;setOrders(orders.map(o=>o.id===order.id?{...o,notes:[...o.notes,{id:mkId('n'),text:noteText.trim(),createdAt:new Date().toLocaleString('zh-TW')}]}:o));setNoteText('');};
+  const insertEmoji=(emoji)=>{const ta=textareaRef.current;if(ta){const s=ta.selectionStart,e=ta.selectionEnd;const nv=noteText.slice(0,s)+emoji+noteText.slice(e);setNoteText(nv);setTimeout(()=>{ta.focus();ta.setSelectionRange(s+emoji.length,s+emoji.length);},0);}else setNoteText(noteText+emoji);};
+  const total=order.tasks.reduce((s,t)=>s+(t.totalPrice||0),0);
+  return (
+    <div>
+      <div className="grid grid-cols-2 gap-3 mb-4 text-sm">
+        <div><span className="font-medium">客戶：</span>{order.customerName}</div><div><span className="font-medium">電話：</span>{order.phone}</div>
+        <div><span className="font-medium">Email：</span>{order.email||'—'}</div><div><span className="font-medium">地址：</span>{order.city}{order.district}{order.address}</div>
+        {order.taxId&&<div><span className="font-medium">統編：</span>{order.taxId} {order.invoiceTitle}</div>}
+        <div><span className="font-medium">供應商：</span>{vendors.find(v=>v.id===order.vendorId)?.name||'未派案'}</div>
+        <div><span className="font-medium">施工人員：</span>{caseHandlers.find(c=>c.id===order.handlerId)?.name||'未指派'}</div>
+        <div><span className="font-medium">來源：</span>{order.source} | <span className="font-medium">付款：</span>{order.paymentMethod}</div>
+      </div>
+      <div className="mb-4">
+        <div className="font-medium mb-2 text-sm">任務明細：（合計 NT${total.toLocaleString()}）</div>
+        {order.tasks.map(t=>{const prod=globalProducts.find(p=>p.id===t.productId);const qty=t.qty||1;return(<div key={t.id} className="bg-white p-3 rounded border border-gray-200 text-sm mb-2"><div className="font-medium">{prod?.name||'未知商品'}{qty>1?` × ${qty} 件`:''}</div><div className="text-gray-500">NT${(t.unitPrice||t.totalPrice||0).toLocaleString()} × {qty} = NT${(t.totalPrice||0).toLocaleString()} | {t.startDate} {t.startTime} ~ {t.endDate} {t.endTime}</div>{!t.sameAsCustomer&&<div className="text-gray-500">聯絡人：{t.contactName} {t.contactPhone}</div>}</div>);})}
+      </div>
+      <div className="mb-4">
+        <div className="font-medium mb-2 text-sm">備註記錄：</div>
+        {order.notes.map(n=>(<div key={n.id} className="bg-white p-2 rounded border border-gray-200 text-sm mb-2"><div>{n.text}</div><div className="text-xs text-gray-400 mt-1">{n.createdAt}</div></div>))}
+        <div className="flex gap-2 items-end mt-2"><div className="flex-1"><textarea ref={textareaRef} value={noteText} onChange={e=>setNoteText(e.target.value)} placeholder="輸入備註..." className="w-full border border-gray-300 rounded px-3 py-2 text-sm resize-none" rows={2}/></div><div className="flex flex-col gap-1"><EmojiPicker onSelect={insertEmoji}/><button onClick={addNote} className="bg-blue-500 text-white px-3 py-1 rounded text-sm">新增</button></div></div>
+      </div>
+      <div className="flex gap-2"><button onClick={onEdit} className="bg-blue-500 text-white px-4 py-2 rounded text-sm">✏️ 編輯</button><button onClick={onQuote} className="bg-purple-500 text-white px-4 py-2 rounded text-sm">📄 報價單</button></div>
+    </div>
+  );
+}
+function TaskForm({task,idx,globalProducts,onSelectProduct,onUpdateQty,onUpdateUnitPrice,onUpdateTask,onRemove,canRemove}) {
+  return (
+    <div className="bg-white p-3 rounded border mb-2">
+      <div className="flex justify-between mb-2"><span className="font-medium text-sm">任務 {idx+1}</span>{canRemove&&<button type="button" onClick={onRemove} className="text-red-500 text-xs">移除</button>}</div>
+      <div className="grid grid-cols-3 gap-3">
+        <div className="col-span-3"><label className="text-sm font-medium text-gray-700 block mb-1">商品（選擇後自動帶入單價）</label><ProductComboBox globalProducts={globalProducts} value={task.productId} onChange={v=>onSelectProduct(task.id,v)}/></div>
+        <Input label="數量" type="number" value={task.qty||1} onChange={v=>{const q=Math.max(1,parseInt(v)||1);onUpdateQty(task.id,q);}}/>
+        <Input label="單價 (NT$)" type="number" value={task.unitPrice||0} onChange={v=>onUpdateUnitPrice(task.id,parseFloat(v)||0)}/>
+        <div className="flex flex-col gap-1"><label className="text-sm text-gray-500">小計</label><div className="bg-blue-50 border border-blue-100 rounded px-3 py-2 text-sm font-bold text-blue-700">NT${((task.unitPrice||0)*(task.qty||1)).toLocaleString()}</div></div>
+        <Input label="服務日期" type="date" value={(task.startDate||'').replace(/\//g,'-')} onChange={v=>onUpdateTask(task.id,'startDate',v.replace(/-/g,'/'))}/>
+        <Input label="開始時間" type="time" value={task.startTime} onChange={v=>onUpdateTask(task.id,'startTime',v)}/>
+        <Input label="結束日期" type="date" value={(task.endDate||'').replace(/\//g,'-')} onChange={v=>onUpdateTask(task.id,'endDate',v.replace(/-/g,'/'))}/>
+      </div>
+    </div>
+  );
+}
+function OrderCreateForm({vendors,globalProducts,caseHandlers,onSave,onCancel,existingCount}) {
+  const nextNum=String(existingCount+1).padStart(3,'0');
+  const today=new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit'}).replace(/\//g,'/');
+  const [form,setForm]=useState({id:mkId('o'),orderNo:`ORD-2026-${nextNum}`,status:'pending',createdAt:today,source:'官網',paymentMethod:'信用卡',customerName:'',phone:'',email:'',taxId:'',invoiceTitle:'',city:'台北市',district:'',address:'',vendorId:'',handlerId:'',tasks:[{id:mkTaskId(),sameAsCustomer:true,contactName:'',contactPhone:'',contactCity:'',contactDistrict:'',contactAddress:'',productId:'',qty:1,unitPrice:0,totalPrice:0,startDate:'',startTime:'09:00',endDate:'',endTime:'18:00'}],notes:[]});
+  const setF=(k,v)=>setForm({...form,[k]:v});
+  const selectedPids=form.tasks.map(t=>t.productId).filter(Boolean);
+  const vendorIdsFromProds=[...new Set(selectedPids.map(pid=>globalProducts.find(p=>p.id===pid)?.vendorId).filter(Boolean))];
+  const availableVendors=selectedPids.length>0?vendors.filter(v=>vendorIdsFromProds.includes(v.id)):vendors;
+  const vendorHandlers=caseHandlers.filter(ch=>ch.vendorId===form.vendorId);
+  const addTask=()=>setForm({...form,tasks:[...form.tasks,{id:mkTaskId(),sameAsCustomer:true,contactName:'',contactPhone:'',contactCity:'',contactDistrict:'',contactAddress:'',productId:'',qty:1,unitPrice:0,totalPrice:0,startDate:'',startTime:'09:00',endDate:'',endTime:'18:00'}]});
+  const removeTask=(tid)=>setForm({...form,tasks:form.tasks.filter(t=>t.id!==tid)});
+  const selectProduct=(tid,pid)=>{
+    const p=globalProducts.find(x=>x.id===pid);const unitPrice=p?p.retailPrice:0;
+    const newTasks=form.tasks.map(t=>t.id===tid?{...t,productId:pid,unitPrice,totalPrice:unitPrice*(t.qty||1)}:t);
+    const newPids=newTasks.map(t=>t.productId).filter(Boolean);
+    const newVids=[...new Set(newPids.map(pid2=>globalProducts.find(p2=>p2.id===pid2)?.vendorId).filter(Boolean))];
+    const newVid=form.vendorId&&newVids.includes(form.vendorId)?form.vendorId:'';
+    setForm({...form,tasks:newTasks,vendorId:newVid,handlerId:newVid?form.handlerId:''});
+  };
+  const updateQty=(tid,q)=>setForm({...form,tasks:form.tasks.map(t=>t.id===tid?{...t,qty:q,totalPrice:(t.unitPrice||0)*q}:t)});
+  const updateUnitPrice=(tid,up)=>setForm({...form,tasks:form.tasks.map(t=>t.id===tid?{...t,unitPrice:up,totalPrice:up*(t.qty||1)}:t)});
+  const updateTask=(tid,k,v)=>setForm({...form,tasks:form.tasks.map(t=>t.id===tid?{...t,[k]:v}:t)});
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-3 gap-4"><Input label="訂單編號" value={form.orderNo} onChange={v=>setF('orderNo',v)}/><Select label="狀態" value={form.status} onChange={v=>setF('status',v)} options={ORDER_STATUSES.map(s=>({id:s.id,label:s.label}))}/><Input label="建立日期" type="date" value={form.createdAt.replace(/\//g,'-')} onChange={v=>setF('createdAt',v.replace(/-/g,'/'))} /></div>
+      <div className="grid grid-cols-2 gap-4"><Select label="來源" value={form.source} onChange={v=>setF('source',v)} options={['官網','Line','電話','Email','FB','現場'].map(s=>({id:s,label:s}))}/><Select label="付款方式" value={form.paymentMethod} onChange={v=>setF('paymentMethod',v)} options={['信用卡','匯款','現金','Line Pay','街口支付'].map(m=>({id:m,label:m}))}/></div>
+      <div className="grid grid-cols-3 gap-4"><Input label="客戶姓名" value={form.customerName} onChange={v=>setF('customerName',v)}/><Input label="電話" value={form.phone} onChange={v=>setF('phone',v)}/><Input label="Email" value={form.email} onChange={v=>setF('email',v)}/></div>
+      <div className="grid grid-cols-3 gap-4"><Input label="地址" value={form.address} onChange={v=>setF('address',v)}/><Input label="統一編號" value={form.taxId} onChange={v=>setF('taxId',v)}/><Input label="發票抬頭" value={form.invoiceTitle} onChange={v=>setF('invoiceTitle',v)}/></div>
+      <div>
+        <div className="font-medium mb-2 text-sm">任務明細（請先選商品，再選供應商）</div>
+        {form.tasks.map((task,idx)=><TaskForm key={task.id} task={task} idx={idx} globalProducts={globalProducts} onSelectProduct={selectProduct} onUpdateQty={updateQty} onUpdateUnitPrice={updateUnitPrice} onUpdateTask={updateTask} onRemove={()=>removeTask(task.id)} canRemove={form.tasks.length>1}/>)}
+        <button type="button" onClick={addTask} className="text-blue-500 text-sm border border-blue-300 px-3 py-1 rounded hover:bg-blue-50">+ 新增任務</button>
+      </div>
+      <div className={selectedPids.length===0?'opacity-60':''}> 
+        {selectedPids.length===0&&<div className="text-xs text-orange-600 bg-orange-50 border border-orange-200 p-2 rounded mb-2">⚠️ 請先選擇任務商品，供應商選單會依商品自動過濾</div>}
+        <div className="grid grid-cols-2 gap-4"><Select label="供應商（依商品過濾）" value={form.vendorId} onChange={v=>setForm({...form,vendorId:v,handlerId:''})} options={availableVendors.map(v=>({id:v.id,label:v.name}))}/><Select label="施工人員" value={form.handlerId} onChange={v=>setF('handlerId',v)} options={vendorHandlers.map(ch=>({id:ch.id,label:ch.name}))}/></div>
+      </div>
+      <div className="flex gap-2"><button onClick={()=>onSave(form)} className="bg-green-500 text-white px-4 py-2 rounded text-sm">保存訂單</button><button onClick={onCancel} className="bg-gray-500 text-white px-4 py-2 rounded text-sm">取消</button></div>
+    </div>
+  );
+}
+function OrderEditForm({order,setEditData,onSave,onCancel,vendors,globalProducts,caseHandlers}) {
+  const selectedPids=order.tasks.map(t=>t.productId).filter(Boolean);
+  const vendorIdsFromProds=[...new Set(selectedPids.map(pid=>globalProducts.find(p=>p.id===pid)?.vendorId).filter(Boolean))];
+  const availableVendors=selectedPids.length>0?vendors.filter(v=>vendorIdsFromProds.includes(v.id)):vendors;
+  const vendorHandlers=caseHandlers.filter(ch=>ch.vendorId===order.vendorId);
+  const addTask=()=>setEditData({...order,tasks:[...order.tasks,{id:mkTaskId(),sameAsCustomer:true,contactName:'',contactPhone:'',contactCity:'',contactDistrict:'',contactAddress:'',productId:'',qty:1,unitPrice:0,totalPrice:0,startDate:'',startTime:'09:00',endDate:'',endTime:'18:00'}]});
+  const removeTask=(tid)=>setEditData({...order,tasks:order.tasks.filter(t=>t.id!==tid)});
+  const selectProduct=(tid,pid)=>{
+    const p=globalProducts.find(x=>x.id===pid);const unitPrice=p?p.retailPrice:0;
+    const newTasks=order.tasks.map(t=>t.id===tid?{...t,productId:pid,unitPrice,totalPrice:unitPrice*(t.qty||1)}:t);
+    const newPids=newTasks.map(t=>t.productId).filter(Boolean);
+    const newVids=[...new Set(newPids.map(pid2=>globalProducts.find(p2=>p2.id===pid2)?.vendorId).filter(Boolean))];
+    const newVid=order.vendorId&&newVids.includes(order.vendorId)?order.vendorId:'';
+    setEditData({...order,tasks:newTasks,vendorId:newVid,handlerId:newVid?order.handlerId:''});
+  };
+  const updateQty=(tid,q)=>setEditData({...order,tasks:order.tasks.map(t=>t.id===tid?{...t,qty:q,totalPrice:(t.unitPrice||0)*q}:t)});
+  const updateUnitPrice=(tid,up)=>setEditData({...order,tasks:order.tasks.map(t=>t.id===tid?{...t,unitPrice:up,totalPrice:up*(t.qty||1)}:t)});
+  const updateTask=(tid,k,v)=>setEditData({...order,tasks:order.tasks.map(t=>t.id===tid?{...t,[k]:v}:t)});
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-3 gap-4"><Input label="客戶名" value={order.customerName} onChange={v=>setEditData({...order,customerName:v})}/><Input label="電話" value={order.phone} onChange={v=>setEditData({...order,phone:v})}/><Input label="Email" value={order.email} onChange={v=>setEditData({...order,email:v})}/></div>
+      <div>
+        <div className="font-medium mb-2 text-sm">任務明細（請先選商品，再選供應商）</div>
+        {order.tasks.map((task,idx)=><TaskForm key={task.id} task={task} idx={idx} globalProducts={globalProducts} onSelectProduct={selectProduct} onUpdateQty={updateQty} onUpdateUnitPrice={updateUnitPrice} onUpdateTask={updateTask} onRemove={()=>removeTask(task.id)} canRemove={order.tasks.length>1}/>)}
+        <button type="button" onClick={addTask} className="text-blue-500 text-sm border border-blue-300 px-3 py-1 rounded hover:bg-blue-50">+ 新增任務</button>
+      </div>
+      <div className={selectedPids.length===0?'opacity-60':''}>
+        {selectedPids.length===0&&<div className="text-xs text-orange-600 bg-orange-50 border border-orange-200 p-2 rounded mb-2">⚠️ 請先選擇任務商品</div>}
+        <div className="grid grid-cols-3 gap-4"><Select label="供應商（依商品過濾）" value={order.vendorId} onChange={v=>setEditData({...order,vendorId:v,handlerId:''})} options={availableVendors.map(v=>({id:v.id,label:v.name}))}/><Select label="施工人員" value={order.handlerId} onChange={v=>setEditData({...order,handlerId:v})} options={vendorHandlers.map(ch=>({id:ch.id,label:ch.name}))}/><Select label="狀態" value={order.status} onChange={v=>setEditData({...order,status:v})} options={ORDER_STATUSES.map(s=>({id:s.id,label:s.label}))}/></div>
+      </div>
+      <div className="flex gap-2"><button onClick={onSave} className="bg-green-500 text-white px-4 py-2 rounded text-sm">保存</button><button onClick={onCancel} className="bg-gray-500 text-white px-4 py-2 rounded text-sm">取消</button></div>
+    </div>
+  );
+}
+function QuotePrintView({order,globalProducts,vendors,onBack}) {
+  const vendor=vendors.find(v=>v.id===order.vendorId);
+  const total=order.tasks.reduce((s,t)=>s+(t.totalPrice||0),0);
+  return (
+    <div className="p-6 max-w-3xl mx-auto">
+      <div className="no-print flex gap-2 mb-4"><button onClick={onBack} className="bg-gray-500 text-white px-4 py-2 rounded text-sm">← 返回</button><button onClick={()=>window.print()} className="bg-blue-500 text-white px-4 py-2 rounded text-sm">🖨️ 列印 / 匯出 PDF</button></div>
+      <div className="bg-white border border-gray-200 p-8 rounded shadow">
+        <div className="flex justify-between items-start mb-8"><div><h1 className="text-3xl font-bold text-blue-700">報 價 單</h1><div className="text-gray-400 text-sm mt-1">Quotation</div></div><div className="text-right text-sm text-gray-600"><div className="font-bold text-gray-800 text-base">{vendor?.name||'供應商'}</div><div>{vendor?.contact}</div><div>{vendor?.phone}</div><div>{vendor?.email}</div></div></div>
+        <div className="grid grid-cols-2 gap-8 mb-6 text-sm"><div><div className="font-bold text-gray-700 border-b border-gray-200 pb-1 mb-2">客戶資訊</div><div>姓名：{order.customerName}</div><div>電話：{order.phone}</div>{order.email&&<div>Email：{order.email}</div>}<div>地址：{order.city}{order.district}{order.address}</div>{order.taxId&&<div>統編：{order.taxId} {order.invoiceTitle}</div>}</div><div><div className="font-bold text-gray-700 border-b border-gray-200 pb-1 mb-2">報價資訊</div><div>訂單編號：{order.orderNo}</div><div>報價日期：{order.createdAt}</div><div>付款方式：{order.paymentMethod}</div></div></div>
+        <table className="w-full mb-6 text-sm border-collapse"><thead><tr className="bg-blue-600 text-white"><th className="px-3 py-2 text-left">#</th><th className="px-3 py-2 text-left">服務項目</th><th className="px-3 py-2 text-left">類別</th><th className="px-3 py-2 text-center">數量</th><th className="px-3 py-2 text-right">單價</th><th className="px-3 py-2 text-left">服務日期</th><th className="px-3 py-2 text-right">小計</th></tr></thead><tbody>{order.tasks.map((t,i)=>{const prod=globalProducts.find(p=>p.id===t.productId);const qty=t.qty||1;const up=t.unitPrice||t.totalPrice||0;return(<tr key={t.id} className={i%2===0?'bg-gray-50':''}><td className="px-3 py-2 border-b border-gray-100">{i+1}</td><td className="px-3 py-2 border-b border-gray-100">{prod?.name||'—'}</td><td className="px-3 py-2 border-b border-gray-100">{prod?.category||'—'}</td><td className="px-3 py-2 border-b border-gray-100 text-center">{qty}</td><td className="px-3 py-2 border-b border-gray-100 text-right">NT$ {up.toLocaleString()}</td><td className="px-3 py-2 border-b border-gray-100">{t.startDate} {t.startTime}</td><td className="px-3 py-2 border-b border-gray-100 text-right">NT$ {(t.totalPrice||0).toLocaleString()}</td></tr>);})}</tbody><tfoot><tr className="bg-blue-50 font-bold"><td colSpan={6} className="px-3 py-3 text-right text-blue-700">合計金額</td><td className="px-3 py-3 text-right text-blue-700 text-lg">NT$ {total.toLocaleString()}</td></tr></tfoot></table>
+        <div className="text-xs text-gray-400 border-t pt-4">* 本報價單有效期間 30 天。如有疑問，請聯繫供應商。</div>
+      </div>
+    </div>
+  );
+}
+
+function VendorPortal({auth,vendor,orders,setOrders,allOrders,caseHandlers,schedules,setSchedules,globalProducts,onLogout}) {
+  const [tab,setTab]=useState('orders');const [quotePrintOrder,setQuotePrintOrder]=useState(null);
+  if(quotePrintOrder) return <QuotePrintView order={quotePrintOrder} globalProducts={globalProducts} vendors={vendor?[vendor]:[]} onBack={()=>setQuotePrintOrder(null)}/>;
+  const NavBtn=({id,label})=><button onClick={()=>setTab(id)} className={`px-3 py-2 rounded text-left text-sm ${tab===id?'bg-green-900':'hover:bg-green-600'}`}>{label}</button>;
+  return (<div className="flex h-screen bg-gray-100"><nav className="w-56 bg-green-700 text-white p-4 flex flex-col gap-1"><div className="mb-3"><div className="font-bold">供應商後台</div><div className="text-xs text-green-200 mt-1">{vendor?.name}</div></div><NavBtn id="orders" label="📋 我的訂單"/><NavBtn id="handlers" label="🧑‍🔧 施工人員"/><NavBtn id="schedule" label="🗓️ 排程管理"/><div className="mt-auto pt-4 border-t border-green-500"><button onClick={onLogout} className="px-3 py-2 rounded text-left text-sm hover:bg-green-600 w-full">🚪 登出</button></div></nav><div className="flex-1 overflow-auto">{tab==='orders'&&<VendorOrdersView orders={orders} globalProducts={globalProducts} caseHandlers={caseHandlers} onQuote={setQuotePrintOrder} setOrders={setOrders} allOrders={allOrders} vendorId={auth.vendorId}/>}{tab==='handlers'&&<VendorHandlersView caseHandlers={caseHandlers} schedules={schedules} globalProducts={globalProducts}/>}{tab==='schedule'&&<VendorScheduleView caseHandlers={caseHandlers} schedules={schedules} setSchedules={setSchedules}/>}</div></div>);
+}
+function VendorOrdersView({orders,globalProducts,caseHandlers,onQuote,setOrders,allOrders,vendorId}) {
+  const [expandedId,setExpandedId]=useState(null);const [statusFilter,setStatusFilter]=useState('');
+  const filtered=orders.filter(o=>!statusFilter||o.status===statusFilter);
+  return (<div className="p-6"><h2 className="text-2xl font-bold mb-4">📋 我的訂單</h2><div className="bg-white p-4 rounded shadow mb-4 w-64"><Select label="狀態篩選" value={statusFilter} onChange={setStatusFilter} options={ORDER_STATUSES.map(s=>({id:s.id,label:s.label}))}/></div><div className="bg-white rounded shadow">{filtered.length===0&&<div className="p-8 text-center text-gray-400">目前沒有訂單</div>}{filtered.map(order=>(<div key={order.id} className="border-b last:border-0"><div onClick={()=>setExpandedId(expandedId===order.id?null:order.id)} className="cursor-pointer flex justify-between items-center p-4 hover:bg-gray-50"><div><div className="font-bold">{order.orderNo} — {order.customerName}</div><div className="text-sm text-gray-500">{order.createdAt} | {order.city}{order.district}</div></div><span style={{background:STATUS_MAP[order.status]?.bg,color:STATUS_MAP[order.status]?.color}} className="px-3 py-1 rounded text-sm font-medium">{STATUS_MAP[order.status]?.label}</span></div>{expandedId===order.id&&(<div className="bg-gray-50 p-4 border-t text-sm"><div className="grid grid-cols-2 gap-2 mb-3"><div><span className="font-medium">電話：</span>{order.phone}</div><div><span className="font-medium">施工：</span>{caseHandlers.find(c=>c.id===order.handlerId)?.name||'未指派'}</div></div><div className="mb-3">{order.tasks.map(t=>{const prod=globalProducts.find(p=>p.id===t.productId);const qty=t.qty||1;return<div key={t.id} className="bg-white p-2 rounded border text-xs mb-1">{prod?.name}{qty>1?` ×${qty}`:''} (NT${t.totalPrice}) | {t.startDate} {t.startTime}</div>;})}</div><button onClick={()=>onQuote(order)} className="bg-purple-500 text-white px-3 py-1 rounded text-sm">📄 報價單</button></div>)}</div>))}</div></div>);
+}
+function VendorHandlersView({caseHandlers,schedules,globalProducts}) {
+  return (<div className="p-6"><h2 className="text-2xl font-bold mb-4">🧑‍🔧 施工人員</h2><div className="space-y-4">{caseHandlers.map(h=>(<div key={h.id} className="bg-white rounded shadow p-4"><div className="font-bold text-lg">{h.name}</div><div className="text-sm text-gray-600">{h.phone} | {h.email}</div><div className="text-sm mt-1"><span className="font-medium">服務地區：</span>{h.regions.join(', ')||'未設定'}</div><div className="text-sm mt-1"><span className="font-medium">可用日：</span>{Object.entries(schedules[h.id]||{}).filter(([,v])=>v==='available').map(([d])=>d).join(', ')||'未設定'}</div></div>))}</div></div>);
+}
+function VendorScheduleView({caseHandlers,schedules,setSchedules}) {
+  const toggleDate=(hid,date)=>{const c=schedules[hid]?.[date];setSchedules({...schedules,[hid]:{...schedules[hid],[date]:c==='available'?'busy':'available'}});};
+  const dates=['2026/03/22','2026/03/23','2026/03/24','2026/03/25','2026/03/26','2026/03/27','2026/03/28','2026/03/29','2026/03/30','2026/03/31'];
+  return (<div className="p-6"><h2 className="text-2xl font-bold mb-4">🗓️ 排程管理</h2><div className="space-y-4">{caseHandlers.map(h=>(<div key={h.id} className="bg-white rounded shadow p-4"><div className="font-medium mb-3">{h.name}</div><div className="grid grid-cols-5 gap-2">{dates.map(date=>{const s=schedules[h.id]?.[date]||'unknown';const bg=s==='available'?'#d1fae5':s==='busy'?'#fee2e2':'#f3f4f6';return(<button key={date} onClick={()=>toggleDate(h.id,date)} style={{background:bg}} className="px-2 py-2 rounded text-xs font-medium text-center">{date.slice(5)}<br/><span>{s==='available'?'可用':s==='busy'?'忙碌':'未定'}</span></button>);})}</div></div>))}</div></div>);
+}
+
+function AssignmentPage({orders,setOrders,vendors,caseHandlers,globalProducts}) {
+  const [filters,setFilters]=useState({vendor:'',handler:'',status:'',dateFrom:'',dateTo:''});
+  const [editingTask,setEditingTask]=useState(null);const [creating,setCreating]=useState(false);
+  const allTasks=orders.flatMap(order=>order.tasks.map(task=>({...task,orderId:order.id,orderNo:order.orderNo,customerName:order.customerName,createdAt:order.createdAt,vendorId:order.vendorId,handlerId:order.handlerId,orderStatus:order.status})));
+  const filtered=allTasks.filter(t=>{if(filters.vendor&&t.vendorId!==filters.vendor)return false;if(filters.handler&&t.handlerId!==filters.handler)return false;if(filters.status&&t.orderStatus!==filters.status)return false;if(filters.dateFrom&&t.startDate<filters.dateFrom.replace(/-/g,'/'))return false;if(filters.dateTo&&t.startDate>filters.dateTo.replace(/-/g,'/'))return false;return true;});
+  const saveTask=(updated)=>{setOrders(orders.map(order=>{if(order.id!==updated.orderId)return order;return {...order,vendorId:updated.vendorId,handlerId:updated.handlerId,status:updated.orderStatus,tasks:order.tasks.map(t=>t.id!==updated.id?t:{...t,productId:updated.productId,qty:updated.qty||1,unitPrice:updated.unitPrice||0,totalPrice:updated.totalPrice||0,startDate:updated.startDate,startTime:updated.startTime,endDate:updated.endDate,endTime:updated.endTime})};}));setEditingTask(null);};
+  const deleteTask=(task)=>{if(!window.confirm(`確定刪除「${task.customerName}」的此任務？`))return;const upd=orders.map(order=>{if(order.id!==task.orderId)return order;return{...order,tasks:order.tasks.filter(t=>t.id!==task.id)};}).filter(order=>order.tasks.length>0);setOrders(upd);};
+  const createTask=(data)=>{const nextNum=String(orders.length+1).padStart(3,'0');const newOrder={id:mkId('o'),orderNo:`ORD-${new Date().getFullYear()}-${nextNum}`,status:data.orderStatus||'pending',createdAt:new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit'}).replace(/\//g,'/'),source:'派案系統',paymentMethod:'未定',customerName:data.customerName,phone:data.phone||'',email:'',taxId:'',invoiceTitle:'',city:'',district:'',address:'',vendorId:data.vendorId||'',handlerId:data.handlerId||'',tasks:[{id:mkTaskId(),sameAsCustomer:true,contactName:'',contactPhone:'',contactCity:'',contactDistrict:'',contactAddress:'',productId:data.productId||'',qty:data.qty||1,unitPrice:data.unitPrice||0,totalPrice:data.totalPrice||0,startDate:data.startDate||'',startTime:data.startTime||'09:00',endDate:data.startDate||'',endTime:data.endTime||'18:00'}],notes:[]};setOrders([...orders,newOrder]);setCreating(false);};
+  return (
+    <div className="p-6">
+      <div className="flex justify-between items-center mb-4"><h2 className="text-2xl font-bold">👥 派案管理</h2><button onClick={()=>setCreating(!creating)} className="bg-green-500 text-white px-4 py-2 rounded text-sm">＋ 新增任務</button></div>
+      {creating&&(<div className="bg-green-50 p-4 rounded shadow mb-4"><AssignmentCreateForm vendors={vendors} globalProducts={globalProducts} caseHandlers={caseHandlers} onSave={createTask} onCancel={()=>setCreating(false)}/></div>)}
+      <div className="bg-white p-4 rounded shadow mb-4"><div className="grid grid-cols-5 gap-4"><Select label="供應商" value={filters.vendor} onChange={v=>setFilters({...filters,vendor:v})} options={vendors.map(v=>({id:v.id,label:v.name}))}/><Select label="負責顧問" value={filters.handler} onChange={v=>setFilters({...filters,handler:v})} options={caseHandlers.map(ch=>({id:ch.id,label:ch.name}))}/><Select label="派案狀態" value={filters.status} onChange={v=>setFilters({...filters,status:v})} options={ORDER_STATUSES.map(s=>({id:s.id,label:s.label}))}/><Input label="服務日期起" type="date" value={filters.dateFrom} onChange={v=>setFilters({...filters,dateFrom:v})}/><Input label="服務日期迄" type="date" value={filters.dateTo} onChange={v=>setFilters({...filters,dateTo:v})}/></div></div>
+      <div className="bg-white rounded shadow overflow-x-auto"><table className="w-full text-sm"><thead className="bg-blue-100"><tr><th className="px-4 py-3 text-left whitespace-nowrap">客戶名稱</th><th className="px-4 py-3 text-left whitespace-nowrap">任務項目</th><th className="px-4 py-3 text-left whitespace-nowrap">進單日期</th><th className="px-4 py-3 text-left whitespace-nowrap">服務日期</th><th className="px-4 py-3 text-left whitespace-nowrap">供應商</th><th className="px-4 py-3 text-left whitespace-nowrap">派案狀態</th><th className="px-4 py-3 text-left whitespace-nowrap">負責顧問</th><th className="px-4 py-3 text-left whitespace-nowrap">操作</th></tr></thead><tbody>{filtered.length===0&&(<tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">無符合條件的任務</td></tr>)}{filtered.map(task=>{const prod=globalProducts.find(p=>p.id===task.productId);const vendor=vendors.find(v=>v.id===task.vendorId);const handler=caseHandlers.find(ch=>ch.id===task.handlerId);const si=STATUS_MAP[task.orderStatus]||{label:task.orderStatus,bg:'#f3f4f6',color:'#374151'};const qty=task.qty||1;return(<tr key={task.id} className="border-b hover:bg-gray-50"><td className="px-4 py-3 font-medium">{task.customerName}</td><td className="px-4 py-3">{prod?.name||'—'}{qty>1?` ×${qty}`:''}</td><td className="px-4 py-3 text-gray-500 whitespace-nowrap">{task.createdAt}</td><td className="px-4 py-3 whitespace-nowrap">{task.startDate} {task.startTime}</td><td className="px-4 py-3">{vendor?vendor.name:<span className="text-orange-500 text-xs">未派案</span>}</td><td className="px-4 py-3"><span style={{background:si.bg,color:si.color}} className="px-2 py-0.5 rounded text-xs font-medium">{si.label}</span></td><td className="px-4 py-3">{handler?handler.name:<span className="text-gray-400 text-xs">未指派</span>}</td><td className="px-4 py-3"><div className="flex gap-1"><button onClick={()=>setEditingTask({...task})} className="bg-blue-500 text-white px-2 py-1 rounded text-xs">編輯</button><button onClick={()=>deleteTask(task)} className="bg-red-500 text-white px-2 py-1 rounded text-xs">刪除</button></div></td></tr>);})}</tbody></table></div>
+      {editingTask&&<AssignmentEditModal task={editingTask} vendors={vendors} globalProducts={globalProducts} caseHandlers={caseHandlers} onSave={saveTask} onCancel={()=>setEditingTask(null)}/>}
+    </div>
+  );
+}
+function AssignmentEditModal({task,vendors,globalProducts,caseHandlers,onSave,onCancel}) {
+  const [form,setForm]=useState({...task,qty:task.qty||1,unitPrice:task.unitPrice||(task.totalPrice||0)});
+  const selProd=globalProducts.find(p=>p.id===form.productId);
+  const autoVid=selProd?.vendorId||'';
+  const availVendors=autoVid?vendors.filter(v=>v.id===autoVid):vendors;
+  const vendorHandlers=caseHandlers.filter(ch=>ch.vendorId===form.vendorId);
+  const selectProduct=(pid)=>{const p=globalProducts.find(x=>x.id===pid);const up=p?p.retailPrice:0;setForm({...form,productId:pid,unitPrice:up,totalPrice:up*(form.qty||1),vendorId:p?p.vendorId:'',handlerId:''});};
+  return (<div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"><div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-2xl max-h-screen overflow-y-auto"><div className="font-bold text-lg mb-4">✏️ 編輯任務 — {task.customerName}</div><div className="grid grid-cols-2 gap-4"><div className="col-span-2"><label className="text-sm font-medium text-gray-700 block mb-1">任務商品</label><ProductComboBox globalProducts={globalProducts} value={form.productId} onChange={selectProduct}/></div><Input label="數量" type="number" value={form.qty||1} onChange={v=>{const q=Math.max(1,parseInt(v)||1);setForm({...form,qty:q,totalPrice:(form.unitPrice||0)*q});}}/><Input label="單價 (NT$)" type="number" value={form.unitPrice||0} onChange={v=>{const up=parseFloat(v)||0;setForm({...form,unitPrice:up,totalPrice:up*(form.qty||1)});}}/><div className="flex flex-col gap-1"><label className="text-sm text-gray-500">小計</label><div className="bg-blue-50 border border-blue-100 rounded px-3 py-2 text-sm font-bold text-blue-700">NT${((form.unitPrice||0)*(form.qty||1)).toLocaleString()}</div></div><Select label="派案狀態" value={form.orderStatus} onChange={v=>setForm({...form,orderStatus:v})} options={ORDER_STATUSES.map(s=>({id:s.id,label:s.label}))}/><Input label="服務日期" type="date" value={(form.startDate||'').replace(/\//g,'-')} onChange={v=>setForm({...form,startDate:v.replace(/-/g,'/')})}/><Input label="服務時間" type="time" value={form.startTime} onChange={v=>setForm({...form,startTime:v})}/><Input label="結束日期" type="date" value={(form.endDate||'').replace(/\//g,'-')} onChange={v=>setForm({...form,endDate:v.replace(/-/g,'/')})}/><Input label="結束時間" type="time" value={form.endTime} onChange={v=>setForm({...form,endTime:v})}/><Select label={`供應商${form.productId?'（依商品）':''}`} value={form.vendorId} onChange={v=>setForm({...form,vendorId:v,handlerId:''})} options={availVendors.map(v=>({id:v.id,label:v.name}))}/><Select label="負責顧問" value={form.handlerId} onChange={v=>setForm({...form,handlerId:v})} options={vendorHandlers.map(ch=>({id:ch.id,label:ch.name}))}/></div><div className="flex gap-2 mt-4"><button onClick={()=>onSave({...form,totalPrice:(form.unitPrice||0)*(form.qty||1)})} className="bg-green-500 text-white px-4 py-2 rounded text-sm">保存</button><button onClick={onCancel} className="bg-gray-500 text-white px-4 py-2 rounded text-sm">取消</button></div></div></div>);
+}
+function AssignmentCreateForm({vendors,globalProducts,caseHandlers,onSave,onCancel}) {
+  const [form,setForm]=useState({customerName:'',phone:'',productId:'',qty:1,unitPrice:0,totalPrice:0,startDate:'',startTime:'09:00',endTime:'18:00',vendorId:'',handlerId:'',orderStatus:'pending'});
+  const selProd=globalProducts.find(p=>p.id===form.productId);
+  const autoVid=selProd?.vendorId||'';
+  const availVendors=autoVid?vendors.filter(v=>v.id===autoVid):vendors;
+  const vendorHandlers=caseHandlers.filter(ch=>ch.vendorId===form.vendorId);
+  const selectProduct=(pid)=>{const p=globalProducts.find(x=>x.id===pid);const up=p?p.retailPrice:0;setForm({...form,productId:pid,unitPrice:up,totalPrice:up*(form.qty||1),vendorId:p?p.vendorId:'',handlerId:''});};
+  return (<div><div className="font-bold mb-3">新增任務</div><div className="grid grid-cols-3 gap-4"><Input label="客戶名稱" value={form.customerName} onChange={v=>setForm({...form,customerName:v})}/><Input label="電話" value={form.phone} onChange={v=>setForm({...form,phone:v})}/><Select label="派案狀態" value={form.orderStatus} onChange={v=>setForm({...form,orderStatus:v})} options={ORDER_STATUSES.map(s=>({id:s.id,label:s.label}))}/><div className="col-span-3"><label className="text-sm font-medium text-gray-700 block mb-1">任務商品（選擇後自動帶入供應商）</label><ProductComboBox globalProducts={globalProducts} value={form.productId} onChange={selectProduct}/></div><Input label="數量" type="number" value={form.qty} onChange={v=>{const q=Math.max(1,parseInt(v)||1);setForm({...form,qty:q,totalPrice:(form.unitPrice||0)*q});}}/><Input label="單價 (NT$)" type="number" value={form.unitPrice} onChange={v=>{const up=parseFloat(v)||0;setForm({...form,unitPrice:up,totalPrice:up*(form.qty||1)});}}/><div className="flex flex-col gap-1"><label className="text-sm text-gray-500">小計</label><div className="bg-blue-50 border border-blue-100 rounded px-3 py-2 text-sm font-bold text-blue-700">NT${((form.unitPrice||0)*(form.qty||1)).toLocaleString()}</div></div><Input label="服務日期" type="date" value={form.startDate} onChange={v=>setForm({...form,startDate:v})}/><Input label="服務時間" type="time" value={form.startTime} onChange={v=>setForm({...form,startTime:v})}/><div/><Select label={`供應商${form.productId?'（依商品自動）':''}`} value={form.vendorId} onChange={v=>setForm({...form,vendorId:v,handlerId:''})} options={availVendors.map(v=>({id:v.id,label:v.name}))}/><Select label="負責顧問" value={form.handlerId} onChange={v=>setForm({...form,handlerId:v})} options={vendorHandlers.map(ch=>({id:ch.id,label:ch.name}))}/></div><div className="flex gap-2 mt-4"><button onClick={()=>onSave(form)} className="bg-green-500 text-white px-4 py-2 rounded text-sm">保存任務</button><button onClick={onCancel} className="bg-gray-500 text-white px-4 py-2 rounded text-sm">取消</button></div></div>);
+}
+
+function VendorNotes({vendor,setVendors,vendors}) {
+  const [open,setOpen]=useState(false);const [noteText,setNoteText]=useState('');const taRef=useRef(null);
+  const addNote=()=>{if(!noteText.trim())return;const note={id:mkId('vn'),text:noteText.trim(),createdAt:new Date().toLocaleString('zh-TW')};setVendors(vendors.map(v=>v.id===vendor.id?{...v,notes:[...(v.notes||[]),note]}:v));setNoteText('');};
+  const insertEmoji=(emoji)=>{const ta=taRef.current;if(ta){const s=ta.selectionStart,e=ta.selectionEnd;const nv=noteText.slice(0,s)+emoji+noteText.slice(e);setNoteText(nv);setTimeout(()=>{ta.focus();ta.setSelectionRange(s+emoji.length,s+emoji.length);},0);}else setNoteText(noteText+emoji);};
+  return (<div className="border border-gray-100 rounded"><button onClick={()=>setOpen(!open)} className="w-full flex justify-between items-center px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">📝 往來記錄（{(vendor.notes||[]).length} 筆）<span>{open?'▲':'▼'}</span></button>{open&&(<div className="px-3 pb-3">{(vendor.notes||[]).map(n=>(<div key={n.id} className="bg-gray-50 p-2 rounded border border-gray-200 text-sm mb-2"><div>{n.text}</div><div className="text-xs text-gray-400 mt-1">{n.createdAt}</div></div>))}<div className="flex gap-2 items-end mt-2"><div className="flex-1"><textarea ref={taRef} value={noteText} onChange={e=>setNoteText(e.target.value)} placeholder="輸入往來記錄..." className="w-full border border-gray-300 rounded px-3 py-2 text-sm resize-none" rows={2}/></div><div className="flex flex-col gap-1"><EmojiPicker onSelect={insertEmoji}/><button onClick={addNote} className="bg-blue-500 text-white px-3 py-1 rounded text-sm">新增</button></div></div></div>)}</div>);
+}
+
+function VendorDetailModal({vendor,globalProducts,orders,vendors,setVendors,onClose}) {
+  const [openSections,setOpenSections]=useState({});
+  const toggleSection=(sec)=>setOpenSections(prev=>({...prev,[sec]:!prev[sec]}));
+  const isSec=(sec)=>!!openSections[sec];
+  const prods=globalProducts.filter(p=>p.vendorId===vendor.id);
+  const avgMargin=prods.length>0?(prods.reduce((s,p)=>s+parseFloat(gm(p)),0)/prods.length).toFixed(1):0;
+  const vo=orders.filter(o=>o.vendorId===vendor.id);
+  const completed=vo.filter(o=>o.status==='completed');
+  const revenue=vo.reduce((s,o)=>s+o.tasks.reduce((ts,t)=>ts+(t.totalPrice||0),0),0);
+  const now=new Date();const ym=`${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}`;
+  const monthOrders=vo.filter(o=>o.createdAt.startsWith(ym));
+  const rate=vo.length>0?(completed.length/vo.length*100).toFixed(0):0;
+  const stats={total:vo.length,revenue,month:monthOrders.length,rate};
+  const isActive=vendor.status!=='inactive';
+  const expiryDiff=(()=>{if(!vendor.contractEnd)return null;const d=new Date(vendor.contractEnd.replace(/\//g,'-'));const diff=Math.ceil((d-new Date())/(1000*60*60*24));return diff<30&&diff>=0?diff:null;})();
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-screen overflow-y-auto">
+        <div className="p-5 border-b border-gray-200 flex justify-between items-start">
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="text-xl font-bold">{vendor.name}</h2>
+              <span className={`px-2 py-0.5 rounded text-xs font-medium ${isActive?'bg-green-100 text-green-700':'bg-gray-200 text-gray-500'}`}>{isActive?'啟用':'停用'}</span>
+              {expiryDiff!==null&&<span className="bg-orange-100 text-orange-600 px-2 py-0.5 rounded text-xs">⚠️ 合約 {expiryDiff} 天到期</span>}
+            </div>
+            <div className="text-sm text-gray-600 mt-1">{vendor.contact} | {vendor.phone} | {vendor.email}</div>
+            {vendor.taxId&&<div className="text-xs text-gray-400 mt-0.5">統編：{vendor.taxId}　地址：{vendor.address||'—'}</div>}
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none ml-4 shrink-0">×</button>
+        </div>
+        <div className="p-5 space-y-2">
+          <div className="border border-gray-100 rounded">
+            <button onClick={()=>toggleSection('contract')} className="w-full flex justify-between items-center px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">📋 合約與付款資訊 <span>{isSec('contract')?'▲':'▼'}</span></button>
+            {isSec('contract')&&(<div className="px-3 pb-3 grid grid-cols-3 gap-2 text-sm"><div><span className="text-gray-500">銀行：</span>{vendor.bankName||'—'}</div><div><span className="text-gray-500">帳號：</span>{vendor.bankAccount||'—'}</div><div><span className="text-gray-500">付款條件：</span>{vendor.paymentTerms||'—'}</div><div><span className="text-gray-500">合約起：</span>{vendor.contractStart||'—'}</div><div><span className="text-gray-500">合約迄：</span>{vendor.contractEnd||'—'}</div><div><span className="text-gray-500">服務類別：</span>{(vendor.categories||[]).join(', ')||'—'}</div></div>)}
+          </div>
+          <div className="border border-gray-100 rounded">
+            <button onClick={()=>toggleSection('regions')} className="w-full flex justify-between items-center px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">🗺️ 服務地區（{(vendor.regions||[]).length} 縣市） <span>{isSec('regions')?'▲':'▼'}</span></button>
+            {isSec('regions')&&(<div className="px-3 pb-3 flex flex-wrap gap-1">{(vendor.regions||[]).length>0?(vendor.regions||[]).map(r=><span key={r} className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-xs">{r}</span>):<span className="text-gray-400 text-xs">未設定</span>}</div>)}
+          </div>
+          <div className="border border-gray-100 rounded">
+            <button onClick={()=>toggleSection('stats')} className="w-full flex justify-between items-center px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">📊 營運數據 <span>{isSec('stats')?'▲':'▼'}</span></button>
+            {isSec('stats')&&(<div className="px-3 pb-3 grid grid-cols-4 gap-3 text-center mt-2"><div className="bg-blue-50 p-3 rounded"><div className="text-2xl font-bold text-blue-600">{stats.total}</div><div className="text-xs text-gray-500 mt-1">累計接案</div></div><div className="bg-green-50 p-3 rounded"><div className="text-lg font-bold text-green-600">NT${stats.revenue.toLocaleString()}</div><div className="text-xs text-gray-500 mt-1">累計金額</div></div><div className="bg-yellow-50 p-3 rounded"><div className="text-2xl font-bold text-yellow-600">{stats.month}</div><div className="text-xs text-gray-500 mt-1">本月案件</div></div><div className="bg-purple-50 p-3 rounded"><div className="text-2xl font-bold text-purple-600">{stats.rate}%</div><div className="text-xs text-gray-500 mt-1">完成率</div></div></div>)}
+          </div>
+          <div className="border border-gray-100 rounded">
+            <button onClick={()=>toggleSection('margin')} className="w-full flex justify-between items-center px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">💰 商品毛利率（{prods.length} 項，平均 <span style={gmStyle(avgMargin)} className="px-1.5 rounded mx-1">{avgMargin}%</span>） <span>{isSec('margin')?'▲':'▼'}</span></button>
+            {isSec('margin')&&(<div className="px-3 pb-3">{prods.map(p=>{const calc=profitCalc(p);return(<div key={p.id} className="flex justify-between text-xs mb-1 bg-gray-50 p-2 rounded"><span>{p.name}</span><span className="flex gap-2 items-center"><span className="text-gray-400">付 NT${calc.toVendor} | 得 NT${calc.ourProfit}</span><span style={gmStyle(gm(p))} className="px-2 py-0.5 rounded">{gm(p)}%</span></span></div>);})} </div>)}
+          </div>
+          <VendorNotes vendor={vendor} setVendors={setVendors} vendors={vendors}/>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function VendorManagementPage({vendors,setVendors,globalProducts,orders}) {
+  const [filters,setFilters]=useState({nameSearch:'',category:'',status:''});
+  const [editingId,setEditingId]=useState(null);const [editData,setEditData]=useState(null);
+  const [newVendor,setNewVendor]=useState(null);const [detailId,setDetailId]=useState(null);
+  const categoriesSet=new Set();globalProducts.forEach(p=>categoriesSet.add(p.category));
+  const filtered=vendors.filter(v=>{if(filters.nameSearch&&!v.name.includes(filters.nameSearch))return false;if(filters.category&&!(v.categories||[]).includes(filters.category))return false;if(filters.status&&v.status!==filters.status)return false;return true;});
+  const toggleStatus=(vid)=>setVendors(vendors.map(v=>v.id===vid?{...v,status:v.status==='inactive'?'active':'inactive'}:v));
+  const deleteVendor=(vid)=>{if(!window.confirm('確定刪除此供應商？'))return;setVendors(vendors.filter(v=>v.id!==vid));};
+  const startEdit=(vendor)=>{setEditingId(vendor.id);setEditData({...vendor,categories:[...(vendor.categories||[])],regions:[...(vendor.regions||[])]});};
+  const saveEdit=()=>{if(editData){setVendors(vendors.map(v=>v.id===editingId?editData:v));setEditingId(null);setEditData(null);}};
+  const addVendor=()=>{setVendors([...vendors,{...newVendor,id:mkId('v'),status:'active',notes:[]}]);setNewVendor(null);};
+  const defVendor={name:'',contact:'',phone:'',email:'',taxId:'',address:'',bankName:'',bankAccount:'',paymentTerms:'月結30天',contractStart:'',contractEnd:'',categories:[],regions:[]};
+  const payTerms=['月結30天','月結60天','月結90天','即期付款','預付'];
+  const VForm=({data,setData,onSave,onCancel})=>(
+    <div className="grid grid-cols-3 gap-3">
+      <Input label="公司名稱" value={data.name} onChange={v=>setData({...data,name:v})}/>
+      <Input label="聯絡人" value={data.contact} onChange={v=>setData({...data,contact:v})}/>
+      <Input label="電話" value={data.phone} onChange={v=>setData({...data,phone:v})}/>
+      <Input label="Email" value={data.email} onChange={v=>setData({...data,email:v})}/>
+      <Input label="統一編號" value={data.taxId||''} onChange={v=>setData({...data,taxId:v})}/>
+      <Input label="公司地址" value={data.address||''} onChange={v=>setData({...data,address:v})}/>
+      <Input label="銀行名稱" value={data.bankName||''} onChange={v=>setData({...data,bankName:v})}/>
+      <Input label="銀行帳號" value={data.bankAccount||''} onChange={v=>setData({...data,bankAccount:v})}/>
+      <div className="flex flex-col gap-1"><label className="text-sm font-medium text-gray-700">付款條件</label><select value={data.paymentTerms||'月結30天'} onChange={e=>setData({...data,paymentTerms:e.target.value})} className="border border-gray-300 rounded px-3 py-2 text-sm">{payTerms.map(t=><option key={t} value={t}>{t}</option>)}</select></div>
+      <Input label="合約起日" type="date" value={(data.contractStart||'').replace(/\//g,'-')} onChange={v=>setData({...data,contractStart:v.replace(/-/g,'/')})}/>
+      <Input label="合約迄日" type="date" value={(data.contractEnd||'').replace(/\//g,'-')} onChange={v=>setData({...data,contractEnd:v.replace(/-/g,'/')})}/>
+      <div><label className="text-sm font-medium text-gray-700 block mb-1">服務類別（逗號分隔）</label><input value={(data.categories||[]).join(',')} onChange={e=>setData({...data,categories:e.target.value.split(',').map(s=>s.trim()).filter(Boolean)})} className="border border-gray-300 rounded px-3 py-2 text-sm w-full" placeholder="整理收納,清潔除蟲"/></div>
+      <div className="col-span-3"><label className="text-sm font-medium text-gray-700 block mb-2">服務地區</label><div className="flex flex-wrap gap-x-3 gap-y-1">{REGIONS.map(r=>(<label key={r} className="flex items-center gap-1 text-xs cursor-pointer"><input type="checkbox" checked={(data.regions||[]).includes(r)} onChange={e=>{const reg=data.regions||[];setData({...data,regions:e.target.checked?[...reg,r]:reg.filter(x=>x!==r)});}}/>{r}</label>))}</div></div>
+      <div className="col-span-3 flex gap-2"><button onClick={onSave} className="bg-green-500 text-white px-4 py-2 rounded text-sm">保存</button><button onClick={onCancel} className="bg-gray-500 text-white px-4 py-2 rounded text-sm">取消</button></div>
+    </div>
+  );
+  return (
+    <div className="p-6">
+      <h2 className="text-2xl font-bold mb-4">🏢 供應商</h2>
+      <div className="bg-white p-4 rounded shadow mb-4 grid grid-cols-4 gap-4">
+        <Input label="名稱搜尋" value={filters.nameSearch} onChange={v=>setFilters({...filters,nameSearch:v})} placeholder="輸入廠商名稱"/>
+        <Select label="服務類別" value={filters.category} onChange={v=>setFilters({...filters,category:v})} options={Array.from(categoriesSet).map(c=>({id:c,label:c}))}/>
+        <Select label="狀態" value={filters.status} onChange={v=>setFilters({...filters,status:v})} options={[{id:'active',label:'✅ 啟用'},{id:'inactive',label:'⛔ 停用'}]}/>
+      </div>
+      <div className="bg-green-50 p-4 rounded shadow mb-4">
+        <div className="font-bold mb-3">新增供應商</div>
+        {newVendor?<VForm data={newVendor} setData={setNewVendor} onSave={addVendor} onCancel={()=>setNewVendor(null)}/>:<button onClick={()=>setNewVendor({...defVendor})} className="bg-green-500 text-white px-4 py-2 rounded text-sm">＋ 新增</button>}
+      </div>
+      {editingId&&editData&&(<div className="bg-blue-50 p-4 rounded shadow mb-4"><div className="font-medium mb-3">✏️ 編輯供應商資料</div><VForm data={editData} setData={setEditData} onSave={saveEdit} onCancel={()=>setEditingId(null)}/></div>)}
+      <div className="bg-white rounded shadow overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-blue-100"><tr><th className="px-4 py-3 text-left">廠商名稱</th><th className="px-4 py-3 text-left">聯絡人</th><th className="px-4 py-3 text-left whitespace-nowrap">電話</th><th className="px-4 py-3 text-left">服務類別</th><th className="px-4 py-3 text-center whitespace-nowrap">地區</th><th className="px-4 py-3 text-left">狀態</th><th className="px-4 py-3 text-left">操作</th></tr></thead>
+          <tbody>
+            {filtered.map(vendor=>{
+              const isActive=vendor.status!=='inactive';
+              const expiryDiff=(()=>{if(!vendor.contractEnd)return null;const d=new Date(vendor.contractEnd.replace(/\//g,'-'));const diff=Math.ceil((d-new Date())/(1000*60*60*24));return diff<30&&diff>=0?diff:null;})();
+              return (
+                <tr key={vendor.id} className="border-b hover:bg-gray-50">
+                  <td className="px-4 py-3"><div className="font-medium">{vendor.name}{expiryDiff!==null&&<span className="ml-1 bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded text-xs">⚠️{expiryDiff}天</span>}</div>{vendor.taxId&&<div className="text-xs text-gray-400">統編：{vendor.taxId}</div>}</td>
+                  <td className="px-4 py-3">{vendor.contact}</td>
+                  <td className="px-4 py-3 whitespace-nowrap">{vendor.phone}</td>
+                  <td className="px-4 py-3 text-xs text-gray-600">{(vendor.categories||[]).join(', ')||'—'}</td>
+                  <td className="px-4 py-3 text-center">{(vendor.regions||[]).length} 縣市</td>
+                  <td className="px-4 py-3"><span className={`px-2 py-0.5 rounded text-xs font-medium ${isActive?'bg-green-100 text-green-700':'bg-gray-200 text-gray-500'}`}>{isActive?'啟用':'停用'}</span></td>
+                  <td className="px-4 py-3"><div className="flex gap-1 flex-wrap"><button onClick={()=>setDetailId(vendor.id)} className="bg-blue-500 text-white px-2 py-1 rounded text-xs">詳細</button><button onClick={()=>startEdit(vendor)} className="bg-yellow-500 text-white px-2 py-1 rounded text-xs">編輯</button><button onClick={()=>toggleStatus(vendor.id)} className={`px-2 py-1 rounded text-xs ${isActive?'bg-gray-200 text-gray-600':'bg-green-100 text-green-700'}`}>{isActive?'停用':'啟用'}</button><button onClick={()=>deleteVendor(vendor.id)} className="bg-red-500 text-white px-2 py-1 rounded text-xs">刪除</button></div></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {detailId&&<VendorDetailModal vendor={vendors.find(v=>v.id===detailId)} globalProducts={globalProducts} orders={orders} vendors={vendors} setVendors={setVendors} onClose={()=>setDetailId(null)}/>}
+    </div>
+  );
+}
+
+function ProductsPage({globalProducts,setGlobalProducts,vendors}) {
+  const [filters,setFilters]=useState({category:'',vendor:'',marginMin:'',marginMax:''});
+  const [editingId,setEditingId]=useState(null);const [editData,setEditData]=useState(null);const [newProduct,setNewProduct]=useState(null);
+  const allCats=[...new Set([...PRODUCT_CATEGORIES,...globalProducts.map(p=>p.category)])];
+  const categoriesSet=new Set(globalProducts.map(p=>p.category));
+  const filtered=globalProducts.filter(p=>{if(filters.category&&p.category!==filters.category)return false;if(filters.vendor&&p.vendorId!==filters.vendor)return false;const m=parseFloat(gm(p));if(filters.marginMin&&m<parseFloat(filters.marginMin))return false;if(filters.marginMax&&m>parseFloat(filters.marginMax))return false;return true;});
+  const startEdit=(p)=>{setEditingId(p.id);setEditData({...p});};
+  const saveEdit=()=>{if(editData){setGlobalProducts(globalProducts.map(p=>p.id===editingId?editData:p));setEditingId(null);setEditData(null);}};
+  const deleteProduct=(id)=>{if(window.confirm('確定刪除此產品？'))setGlobalProducts(globalProducts.filter(p=>p.id!==id));};
+  const addProduct=()=>{setGlobalProducts([...globalProducts,{id:mkId('gp'),category:newProduct.category,name:newProduct.name,retailPrice:parseFloat(newProduct.retailPrice)||0,purchasePrice:parseFloat(newProduct.purchasePrice)||0,commissionAmount:parseFloat(newProduct.commissionAmount)||0,profitMode:newProduct.profitMode||'price',vendorId:newProduct.vendorId,note:newProduct.note||''}]);setNewProduct(null);};
+  const CatSelect=({value,onChange})=>(<div className="flex flex-col gap-1"><label className="text-sm font-medium text-gray-700">類別</label><select value={value} onChange={e=>onChange(e.target.value)} className="border border-gray-300 rounded px-3 py-2 text-sm"><option value="">-- 選擇類別 --</option>{allCats.map(c=><option key={c} value={c}>{c}</option>)}</select></div>);
+  const ProfitModeForm=({data,setData})=>(<div className="col-span-3"><label className="text-sm font-medium text-gray-700 block mb-2">分潤模式</label><div className="flex gap-4 mb-2"><label className="flex items-center gap-2 text-sm cursor-pointer"><input type="radio" checked={data.profitMode==='price'} onChange={()=>setData({...data,profitMode:'price'})}/> 模式一：供應商供貨價</label><label className="flex items-center gap-2 text-sm cursor-pointer"><input type="radio" checked={data.profitMode==='commission'} onChange={()=>setData({...data,profitMode:'commission'})}/> 模式二：供應商抽成金額</label></div>{data.profitMode==='price'&&<Input label="採購價 (NT$)" type="number" value={data.purchasePrice||0} onChange={v=>setData({...data,purchasePrice:parseFloat(v)||0})}/>}{data.profitMode==='commission'&&<Input label="抽成金額 (NT$)" type="number" value={data.commissionAmount||0} onChange={v=>setData({...data,commissionAmount:parseFloat(v)||0})}/>}</div>);
+  const ProfitPreview=({data})=>{if(!data||!data.retailPrice||data.retailPrice<=0)return null;const calc=profitCalc(data);const margin=gm(data);return(<div className="col-span-3 bg-gradient-to-r from-blue-50 to-green-50 p-3 rounded border border-blue-100"><div className="text-xs text-gray-500 mb-2 font-medium">💰 分潤試算（每賣出 1 件）</div><div className="grid grid-cols-4 gap-2 text-center text-sm"><div><div className="text-xs text-gray-400">終端售價</div><div className="font-bold">NT${Number(data.retailPrice).toLocaleString()}</div></div><div><div className="text-xs text-gray-400">需付供應商</div><div className="font-bold text-orange-600">NT${calc.toVendor.toLocaleString()}</div></div><div><div className="text-xs text-gray-400">我方獲得</div><div className="font-bold text-green-600">NT${calc.ourProfit.toLocaleString()}</div></div><div><div className="text-xs text-gray-400">毛利率</div><span style={gmStyle(margin)} className="px-2 py-0.5 rounded font-bold inline-block">{margin}%</span></div></div></div>);};
+  return (
+    <div className="p-6">
+      <h2 className="text-2xl font-bold mb-4">📦 產品列表</h2>
+      <div className="bg-white p-4 rounded shadow mb-4 grid grid-cols-4 gap-4"><Select label="類別" value={filters.category} onChange={v=>setFilters({...filters,category:v})} options={Array.from(categoriesSet).map(c=>({id:c,label:c}))}/><Select label="供應商" value={filters.vendor} onChange={v=>setFilters({...filters,vendor:v})} options={vendors.map(v=>({id:v.id,label:v.name}))}/><Input label="毛利率最小 (%)" type="number" value={filters.marginMin} onChange={v=>setFilters({...filters,marginMin:v})} placeholder="0"/><Input label="毛利率最大 (%)" type="number" value={filters.marginMax} onChange={v=>setFilters({...filters,marginMax:v})} placeholder="100"/></div>
+      <div className="bg-green-50 p-4 rounded shadow mb-4">
+        <div className="font-bold mb-3">新增產品</div>
+        {newProduct?(<div className="grid grid-cols-3 gap-4"><CatSelect value={newProduct.category} onChange={v=>setNewProduct({...newProduct,category:v})}/><Input label="名稱" value={newProduct.name} onChange={v=>setNewProduct({...newProduct,name:v})}/><Select label="供應商" value={newProduct.vendorId} onChange={v=>setNewProduct({...newProduct,vendorId:v})} options={vendors.map(v=>({id:v.id,label:v.name}))}/><Input label="終端售價 (NT$)" type="number" value={newProduct.retailPrice||''} onChange={v=>setNewProduct({...newProduct,retailPrice:parseFloat(v)||0})}/><Input label="備註" value={newProduct.note||''} onChange={v=>setNewProduct({...newProduct,note:v})}/><ProfitModeForm data={newProduct} setData={setNewProduct}/><ProfitPreview data={newProduct}/><div className="col-span-3 flex gap-2"><button onClick={addProduct} className="bg-green-500 text-white px-4 py-2 rounded text-sm">保存</button><button onClick={()=>setNewProduct(null)} className="bg-gray-500 text-white px-4 py-2 rounded text-sm">取消</button></div></div>):(<button onClick={()=>setNewProduct({category:'',name:'',retailPrice:0,purchasePrice:0,commissionAmount:0,profitMode:'price',vendorId:'',note:''})} className="bg-green-500 text-white px-4 py-2 rounded text-sm">＋ 新增</button>)}
+      </div>
+      <div className="bg-white rounded shadow overflow-x-auto">
+        <table className="w-full text-sm"><thead className="bg-blue-100"><tr><th className="px-3 py-2 text-left">類別</th><th className="px-3 py-2 text-left">名稱</th><th className="px-3 py-2 text-right whitespace-nowrap">終端售價</th><th className="px-3 py-2 text-left whitespace-nowrap">分潤模式</th><th className="px-3 py-2 text-right whitespace-nowrap">需付供應商</th><th className="px-3 py-2 text-right whitespace-nowrap">我方獲得</th><th className="px-3 py-2 text-right whitespace-nowrap">毛利率</th><th className="px-3 py-2 text-left">供應商</th><th className="px-3 py-2 text-left">備註</th><th className="px-3 py-2 text-left">操作</th></tr></thead>
+        <tbody>{filtered.map(product=>{const margin=gm(product);const calc=profitCalc(product);const modeLabel=product.profitMode==='commission'?'模式二（抽成）':'模式一（供貨價）';return(<tr key={product.id} className="border-b hover:bg-gray-50"><td className="px-3 py-2">{product.category}</td><td className="px-3 py-2 font-medium">{product.name}</td><td className="px-3 py-2 text-right">NT${product.retailPrice?.toLocaleString()}</td><td className="px-3 py-2 text-xs text-gray-500">{modeLabel}</td><td className="px-3 py-2 text-right text-orange-600">NT${calc.toVendor.toLocaleString()}</td><td className="px-3 py-2 text-right text-green-600">NT${calc.ourProfit.toLocaleString()}</td><td className="px-3 py-2 text-right"><span style={gmStyle(margin)} className="px-2 py-0.5 rounded">{margin}%</span></td><td className="px-3 py-2">{vendors.find(v=>v.id===product.vendorId)?.name||product.vendorId}</td><td className="px-3 py-2 text-gray-500 text-xs">{product.note}</td><td className="px-3 py-2"><div className="flex gap-1"><button onClick={()=>startEdit(product)} className="bg-blue-500 text-white px-2 py-1 rounded text-xs">編輯</button><button onClick={()=>deleteProduct(product.id)} className="bg-red-500 text-white px-2 py-1 rounded text-xs">刪除</button></div></td></tr>);})}</tbody></table>
+      </div>
+      {editingId&&editData&&(<div className="mt-4 bg-blue-50 p-4 rounded shadow"><div className="font-bold mb-3">✏️ 編輯產品</div><div className="grid grid-cols-3 gap-4"><CatSelect value={editData.category} onChange={v=>setEditData({...editData,category:v})}/><Input label="名稱" value={editData.name} onChange={v=>setEditData({...editData,name:v})}/><Select label="供應商" value={editData.vendorId} onChange={v=>setEditData({...editData,vendorId:v})} options={vendors.map(v=>({id:v.id,label:v.name}))}/><Input label="終端售價 (NT$)" type="number" value={editData.retailPrice} onChange={v=>setEditData({...editData,retailPrice:parseFloat(v)||0})}/><Input label="備註" value={editData.note||''} onChange={v=>setEditData({...editData,note:v})}/><ProfitModeForm data={editData} setData={setEditData}/><ProfitPreview data={editData}/><div className="col-span-3 flex gap-2"><button onClick={saveEdit} className="bg-green-500 text-white px-4 py-2 rounded text-sm">保存</button><button onClick={()=>setEditingId(null)} className="bg-gray-500 text-white px-4 py-2 rounded text-sm">取消</button></div></div></div>)}
+    </div>
+  );
+}
+
+function HandlersPage({caseHandlers,setCaseHandlers,vendors,schedules,setSchedules,globalProducts}) {
+  const [expandedId,setExpandedId]=useState(null);const [editingId,setEditingId]=useState(null);const [editData,setEditData]=useState(null);const [newHandler,setNewHandler]=useState(null);
+  const startEdit=(h)=>{setEditingId(h.id);setEditData({...h});};
+  const saveEdit=()=>{if(editData){setCaseHandlers(caseHandlers.map(ch=>ch.id===editingId?editData:ch));setEditingId(null);setEditData(null);}};
+  const addHandler=()=>{const nh={id:mkId('ch'),vendorId:newHandler.vendorId,name:newHandler.name,phone:newHandler.phone,email:newHandler.email,productIds:[],regions:[]};setCaseHandlers([...caseHandlers,nh]);setSchedules({...schedules,[nh.id]:{}});setNewHandler(null);};
+  const toggleDate=(hid,date)=>{const c=schedules[hid]?.[date];setSchedules({...schedules,[hid]:{...schedules[hid],[date]:c==='available'?'busy':'available'}});};
+  const dates=['2026/03/22','2026/03/23','2026/03/24','2026/03/25','2026/03/26','2026/03/27','2026/03/28'];
+  return (
+    <div className="p-6">
+      <h2 className="text-2xl font-bold mb-4">🧑‍🔧 施工人員管理</h2>
+      <div className="bg-green-50 p-4 rounded shadow mb-6"><div className="font-bold mb-3">新增施工人員</div>{newHandler?(<div className="grid grid-cols-2 gap-4"><Select label="所屬供應商" value={newHandler.vendorId} onChange={v=>setNewHandler({...newHandler,vendorId:v})} options={vendors.map(v=>({id:v.id,label:v.name}))}/><Input label="姓名" value={newHandler.name} onChange={v=>setNewHandler({...newHandler,name:v})}/><Input label="電話" value={newHandler.phone} onChange={v=>setNewHandler({...newHandler,phone:v})}/><Input label="Email" value={newHandler.email} onChange={v=>setNewHandler({...newHandler,email:v})}/><div className="col-span-2 flex gap-2"><button onClick={addHandler} className="bg-green-500 text-white px-4 py-2 rounded text-sm">保存</button><button onClick={()=>setNewHandler(null)} className="bg-gray-500 text-white px-4 py-2 rounded text-sm">取消</button></div></div>):(<button onClick={()=>setNewHandler({vendorId:'',name:'',phone:'',email:''})} className="bg-green-500 text-white px-4 py-2 rounded text-sm">＋ 新增</button>)}</div>
+      <div className="space-y-4">
+        {caseHandlers.map(handler=>{
+          const vendor=vendors.find(v=>v.id===handler.vendorId);const prods=globalProducts.filter(p=>p.vendorId===handler.vendorId);
+          return (<div key={handler.id} className="bg-white rounded shadow p-4"><div onClick={()=>setExpandedId(expandedId===handler.id?null:handler.id)} className="cursor-pointer flex justify-between items-center"><div><div className="font-bold text-lg">{handler.name}</div><div className="text-sm text-gray-600">{vendor?.name} | {handler.phone} | {handler.email}</div></div><span className="text-gray-400">{expandedId===handler.id?'▼':'▶'}</span></div>{expandedId===handler.id&&(<div className="mt-4">{editingId===handler.id?(<div className="grid grid-cols-2 gap-4"><Input label="姓名" value={editData.name} onChange={v=>setEditData({...editData,name:v})}/><Input label="電話" value={editData.phone} onChange={v=>setEditData({...editData,phone:v})}/><Input label="Email" value={editData.email} onChange={v=>setEditData({...editData,email:v})}/><div className="col-span-2 flex gap-2"><button onClick={saveEdit} className="bg-green-500 text-white px-4 py-2 rounded text-sm">保存</button><button onClick={()=>setEditingId(null)} className="bg-gray-500 text-white px-4 py-2 rounded text-sm">取消</button></div></div>):(<><div className="bg-gray-50 p-3 rounded mb-3"><div className="font-medium text-sm mb-1">可服務商品（同供應商）</div>{prods.map(p=><div key={p.id} className="text-xs mb-1">{p.name} (NT${p.retailPrice}) — 毛利 {gm(p)}%</div>)}</div><div className="bg-gray-50 p-3 rounded mb-3"><div className="font-medium text-sm mb-1">服務地區</div><div className="text-xs">{handler.regions.join(', ')||'未設定'}</div></div><div className="bg-gray-50 p-3 rounded mb-3"><div className="font-medium text-sm mb-2">排程（點擊切換狀態）</div><div className="grid grid-cols-7 gap-1">{dates.map(date=>{const s=schedules[handler.id]?.[date]||'unknown';const bg=s==='available'?'#d1fae5':s==='busy'?'#fee2e2':'#f3f4f6';return(<button key={date} onClick={()=>toggleDate(handler.id,date)} style={{background:bg}} className="px-1 py-1.5 rounded text-xs font-medium text-center">{date.slice(5)}<br/><span>{s==='available'?'可':s==='busy'?'忙':'？'}</span></button>);})}</div></div><button onClick={()=>startEdit(handler)} className="bg-blue-500 text-white px-4 py-2 rounded text-sm">編輯</button></>)}</div>)}</div>);
+        })}
+      </div>
+    </div>
+  );
+}
+
+function UsersPage({vendorUsers,setVendorUsers,vendors}) {
+  const [expandedId,setExpandedId]=useState(null);const [editingId,setEditingId]=useState(null);const [editData,setEditData]=useState(null);const [newUser,setNewUser]=useState(null);
+  const startEdit=(user,vid)=>{setEditingId(user.id);setEditData({...user,vendorId:vid});};
+  const saveEdit=()=>{if(editData){const vid=editData.vendorId;setVendorUsers({...vendorUsers,[vid]:(vendorUsers[vid]||[]).map(u=>u.id===editingId?{id:u.id,name:editData.name,email:editData.email,permissions:editData.permissions}:u)});setEditingId(null);setEditData(null);}};
+  const addUser=()=>{const nu={id:mkId('vu'),name:newUser.name,email:newUser.email,permissions:newUser.permissions||['view']};const vid=newUser.vendorId;setVendorUsers({...vendorUsers,[vid]:[...(vendorUsers[vid]||[]),nu]});setNewUser(null);};
+  return (
+    <div className="p-6">
+      <h2 className="text-2xl font-bold mb-4">👤 廠商帳號管理</h2>
+      <div className="bg-green-50 p-4 rounded shadow mb-6"><div className="font-bold mb-3">新增帳號</div>{newUser?(<div className="grid grid-cols-2 gap-4"><Select label="所屬供應商" value={newUser.vendorId} onChange={v=>setNewUser({...newUser,vendorId:v})} options={vendors.map(v=>({id:v.id,label:v.name}))}/><Input label="姓名" value={newUser.name} onChange={v=>setNewUser({...newUser,name:v})}/><Input label="Email" value={newUser.email} onChange={v=>setNewUser({...newUser,email:v})}/><div className="col-span-2 flex gap-2"><button onClick={addUser} className="bg-green-500 text-white px-4 py-2 rounded text-sm">保存</button><button onClick={()=>setNewUser(null)} className="bg-gray-500 text-white px-4 py-2 rounded text-sm">取消</button></div></div>):(<button onClick={()=>setNewUser({vendorId:'',name:'',email:'',permissions:[]})} className="bg-green-500 text-white px-4 py-2 rounded text-sm">＋ 新增</button>)}</div>
+      <div className="space-y-4">{vendors.map(vendor=>(<div key={vendor.id} className="bg-white rounded shadow p-4"><div onClick={()=>setExpandedId(expandedId===vendor.id?null:vendor.id)} className="cursor-pointer font-bold text-lg flex justify-between items-center">{vendor.name}<span className="text-gray-400">{expandedId===vendor.id?'▼':'▶'}</span></div>{expandedId===vendor.id&&(<div className="mt-3 space-y-2">{(vendorUsers[vendor.id]||[]).map(user=>(<div key={user.id} className="bg-gray-50 p-3 rounded border border-gray-200">{editingId===user.id?(<div className="space-y-2"><Input label="姓名" value={editData.name} onChange={v=>setEditData({...editData,name:v})}/><Input label="Email" value={editData.email} onChange={v=>setEditData({...editData,email:v})}/><div className="flex gap-2"><button onClick={saveEdit} className="bg-green-500 text-white px-3 py-1 rounded text-sm">保存</button><button onClick={()=>setEditingId(null)} className="bg-gray-500 text-white px-3 py-1 rounded text-sm">取消</button></div></div>):(<div><div className="font-medium">{user.name}</div><div className="text-sm text-gray-600">{user.email}</div><div className="text-xs text-gray-400 mt-1">權限: {user.permissions.join(', ')}</div><button onClick={()=>startEdit(user,vendor.id)} className="mt-2 bg-blue-500 text-white px-3 py-1 rounded text-sm">編輯</button></div>)}</div>))}</div>)}</div>))}</div>
+    </div>
+  );
+}
+
+const root=ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App/>);
+</script>
+</body>
+</html>
