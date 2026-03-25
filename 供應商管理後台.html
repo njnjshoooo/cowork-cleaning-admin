@@ -8,6 +8,7 @@
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 * { box-sizing: border-box; }
 body { margin: 0; font-family: 'Microsoft JhengHei', 'Segoe UI', sans-serif; }
@@ -19,6 +20,12 @@ body { margin: 0; font-family: 'Microsoft JhengHei', 'Segoe UI', sans-serif; }
 <div id="root"></div>
 <script type="text/babel">
 const { useState, useEffect, useRef } = React;
+
+// ===== Supabase Client =====
+const supabaseClient = window.supabase.createClient(
+  'https://wtckwijqczeivtnlalva.supabase.co',
+  'sb_publishable_5KK0TEqRi2_KfPCQd-SfJg_lY4lI5_U'
+);
 
 const ORDER_STATUSES = [
   { id:'pending',    label:'待確認',     bg:'#fef9c3', color:'#854d0e' },
@@ -57,6 +64,81 @@ const profitCalc = (p) => {
 };
 const mkId = (pfx) => pfx+'_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
 const mkTaskId = () => 'task_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
+
+// ===== DB Transform Functions =====
+const transformVendor = (v, notes) => ({
+  id:v.id, name:v.name, contact:v.contact, phone:v.phone, email:v.email,
+  taxId:v.tax_id, address:v.address, bankName:v.bank_name, bankAccount:v.bank_account,
+  contractStart:v.contract_start, contractEnd:v.contract_end, paymentTerms:v.payment_terms,
+  categories:v.categories||[], regions:v.regions||[], status:v.status,
+  notes:(notes||[]).filter(n=>n.vendor_id===v.id).map(n=>({id:n.id,text:n.text,createdAt:n.created_at}))
+});
+const transformProduct = (p) => ({
+  id:p.id, category:p.category, name:p.name,
+  retailPrice:Number(p.retail_price), purchasePrice:Number(p.purchase_price),
+  commissionAmount:Number(p.commission_amount), profitMode:p.profit_mode,
+  vendorId:p.vendor_id, note:p.note||''
+});
+const transformHandler = (h) => ({
+  id:h.id, vendorId:h.vendor_id, name:h.name, phone:h.phone, email:h.email,
+  productIds:h.product_ids||[], regions:h.regions||[]
+});
+const transformTask = (t) => ({
+  id:t.id, sameAsCustomer:t.same_as_customer, contactName:t.contact_name||'',
+  contactPhone:t.contact_phone||'', contactCity:t.contact_city||'',
+  contactDistrict:t.contact_district||'', contactAddress:t.contact_address||'',
+  productId:t.product_id, qty:t.qty||1, unitPrice:Number(t.unit_price)||0,
+  totalPrice:Number(t.total_price)||0, startDate:t.start_date, startTime:t.start_time,
+  endDate:t.end_date, endTime:t.end_time
+});
+const transformOrder = (o, tasks, notes) => ({
+  id:o.id, orderNo:o.order_no, status:o.status, createdAt:o.created_at,
+  source:o.source, paymentMethod:o.payment_method, customerName:o.customer_name,
+  phone:o.phone, email:o.email||'', taxId:o.tax_id||'', invoiceTitle:o.invoice_title||'',
+  city:o.city, district:o.district, address:o.address,
+  vendorId:o.vendor_id||'', handlerId:o.handler_id||'',
+  tasks:(tasks||[]).filter(t=>t.order_id===o.id).map(transformTask),
+  notes:(notes||[]).filter(n=>n.order_id===o.id).map(n=>({id:n.id,text:n.text,createdAt:n.created_at}))
+});
+const transformSchedules = (rows) => {
+  const r={};(rows||[]).forEach(s=>{if(!r[s.handler_id])r[s.handler_id]={};r[s.handler_id][s.date]=s.status;});return r;
+};
+const transformVendorUsers = (rows) => {
+  const r={};(rows||[]).forEach(u=>{if(!r[u.vendor_id])r[u.vendor_id]=[];r[u.vendor_id].push({id:u.id,name:u.name,email:u.email,permissions:u.permissions||[]});});return r;
+};
+
+// ===== To DB converters =====
+const vendorToDb = (v) => ({
+  id:v.id, name:v.name, contact:v.contact, phone:v.phone, email:v.email,
+  tax_id:v.taxId, address:v.address, bank_name:v.bankName, bank_account:v.bankAccount,
+  contract_start:v.contractStart, contract_end:v.contractEnd, payment_terms:v.paymentTerms,
+  categories:v.categories||[], regions:v.regions||[], status:v.status
+});
+const orderToDb = (o) => ({
+  id:o.id, order_no:o.orderNo, status:o.status, created_at:o.createdAt,
+  source:o.source, payment_method:o.paymentMethod, customer_name:o.customerName,
+  phone:o.phone, email:o.email, tax_id:o.taxId, invoice_title:o.invoiceTitle,
+  city:o.city, district:o.district, address:o.address,
+  vendor_id:o.vendorId, handler_id:o.handlerId
+});
+const taskToDb = (t, orderId) => ({
+  id:t.id, order_id:orderId, same_as_customer:t.sameAsCustomer,
+  contact_name:t.contactName, contact_phone:t.contactPhone,
+  contact_city:t.contactCity, contact_district:t.contactDistrict,
+  contact_address:t.contactAddress, product_id:t.productId,
+  qty:t.qty||1, unit_price:t.unitPrice||0, total_price:t.totalPrice||0,
+  start_date:t.startDate, start_time:t.startTime, end_date:t.endDate, end_time:t.endTime
+});
+const productToDb = (p) => ({
+  id:p.id, category:p.category, name:p.name,
+  retail_price:p.retailPrice, purchase_price:p.purchasePrice,
+  commission_amount:p.commissionAmount, profit_mode:p.profitMode,
+  vendor_id:p.vendorId, note:p.note||''
+});
+const handlerToDb = (h) => ({
+  id:h.id, vendor_id:h.vendorId, name:h.name, phone:h.phone, email:h.email,
+  product_ids:h.productIds||[], regions:h.regions||[]
+});
 
 const INIT_GLOBAL_PRODUCTS = [
   { id:'gp1',  category:'整理收納', name:'輕享受方案-整理收納×1', retailPrice:2800, purchasePrice:1680, commissionAmount:0,  profitMode:'price',      vendorId:'v1', note:'適合單一空間' },
@@ -133,23 +215,33 @@ const INIT_ORDERS = [
 ];
 
 function LoginPage({onLogin}) {
-  const [mode,setMode]=useState('admin');const [vendorId,setVendorId]=useState('');const [password,setPassword]=useState('');const [error,setError]=useState('');
-  const handleLogin=()=>{if(mode==='admin'){if(password==='admin123')onLogin({role:'admin',vendorId:null});else setError('密碼錯誤，測試密碼：admin123');}else{if(!vendorId){setError('請選擇供應商');return;}if(password==='vendor123')onLogin({role:'vendor',vendorId});else setError('密碼錯誤，測試密碼：vendor123');}};
-  return (<div className="min-h-screen bg-gradient-to-br from-blue-600 to-blue-800 flex items-center justify-center"><div className="bg-white rounded-2xl shadow-2xl p-8 w-96"><h1 className="text-2xl font-bold text-center text-blue-700 mb-6">🏢 供應商管理後台</h1><div className="flex mb-6 bg-gray-100 rounded-lg p-1"><button onClick={()=>{setMode('admin');setError('');}} className={`flex-1 py-2 rounded-md text-sm font-medium ${mode==='admin'?'bg-white shadow text-blue-600':'text-gray-500'}`}>管理員登入</button><button onClick={()=>{setMode('vendor');setError('');}} className={`flex-1 py-2 rounded-md text-sm font-medium ${mode==='vendor'?'bg-white shadow text-blue-600':'text-gray-500'}`}>供應商登入</button></div>{mode==='vendor'&&(<div className="mb-4"><label className="text-sm font-medium text-gray-700 block mb-1">選擇供應商</label><select value={vendorId} onChange={e=>setVendorId(e.target.value)} className="w-full border border-gray-300 rounded px-3 py-2 text-sm"><option value="">-- 請選擇 --</option>{INIT_VENDORS.map(v=><option key={v.id} value={v.id}>{v.name}</option>)}</select></div>)}<div className="mb-4"><label className="text-sm font-medium text-gray-700 block mb-1">密碼</label><input type="password" value={password} onChange={e=>setPassword(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleLogin()} placeholder={mode==='admin'?'admin123':'vendor123'} className="w-full border border-gray-300 rounded px-3 py-2 text-sm"/></div>{error&&<div className="text-red-500 text-sm mb-4 bg-red-50 p-2 rounded">{error}</div>}<button onClick={handleLogin} className="w-full bg-blue-600 text-white py-2 rounded-lg font-medium hover:bg-blue-700">登入</button><div className="mt-4 text-xs text-gray-400 text-center">管理員密碼: admin123 ｜ 供應商密碼: vendor123</div></div></div>);
+  const [email,setEmail]=useState('');const [password,setPassword]=useState('');const [error,setError]=useState('');const [loading,setLoading]=useState(false);
+  const handleLogin=async()=>{setLoading(true);setError('');
+    const {data,error:authErr}=await supabaseClient.auth.signInWithPassword({email,password});
+    if(authErr){setError('登入失敗：'+authErr.message);setLoading(false);return;}
+    const {data:profile}=await supabaseClient.from('app_users').select('role,vendor_id').eq('id',data.user.id).single();
+    if(!profile){setError('找不到使用者角色，請聯繫管理員');setLoading(false);return;}
+    onLogin({role:profile.role,vendorId:profile.vendor_id});setLoading(false);
+  };
+  return (<div className="min-h-screen bg-gradient-to-br from-blue-600 to-blue-800 flex items-center justify-center"><div className="bg-white rounded-2xl shadow-2xl p-8 w-96"><h1 className="text-2xl font-bold text-center text-blue-700 mb-6">🏢 供應商管理後台</h1><div className="mb-4"><label className="text-sm font-medium text-gray-700 block mb-1">Email</label><input type="email" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleLogin()} placeholder="your@email.com" className="w-full border border-gray-300 rounded px-3 py-2 text-sm"/></div><div className="mb-4"><label className="text-sm font-medium text-gray-700 block mb-1">密碼</label><input type="password" value={password} onChange={e=>setPassword(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleLogin()} placeholder="輸入密碼" className="w-full border border-gray-300 rounded px-3 py-2 text-sm"/></div>{error&&<div className="text-red-500 text-sm mb-4 bg-red-50 p-2 rounded">{error}</div>}<button onClick={handleLogin} disabled={loading} className="w-full bg-blue-600 text-white py-2 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50">{loading?'登入中...':'登入'}</button></div></div>);
 }
 
 function App() {
-  const [auth,setAuth]=useState(null);const [tab,setTab]=useState('orders');
-  const [globalProducts,setGlobalProducts]=useState(INIT_GLOBAL_PRODUCTS);
-  const [vendors,setVendors]=useState(INIT_VENDORS);
-  const [caseHandlers,setCaseHandlers]=useState(INIT_CASE_HANDLERS);
-  const [schedules,setSchedules]=useState(INIT_SCHEDULES);
-  const [vendorUsers,setVendorUsers]=useState(INIT_VENDOR_USERS);
-  const [orders,setOrders]=useState(INIT_ORDERS);
+  const [auth,setAuth]=useState(null);const [tab,setTab]=useState('orders');const [appLoading,setAppLoading]=useState(true);
+  const [globalProducts,setGlobalProducts]=useState([]);
+  const [vendors,setVendors]=useState([]);
+  const [caseHandlers,setCaseHandlers]=useState([]);
+  const [schedules,setSchedules]=useState({});
+  const [vendorUsers,setVendorUsers]=useState({});
+  const [orders,setOrders]=useState([]);
+  useEffect(()=>{supabaseClient.auth.getSession().then(async({data:{session}})=>{if(session){const{data:profile}=await supabaseClient.from('app_users').select('role,vendor_id').eq('id',session.user.id).single();if(profile)setAuth({role:profile.role,vendorId:profile.vendor_id});}setAppLoading(false);});},[]);
+  useEffect(()=>{if(!auth)return;const load=async()=>{const[vR,vnR,pR,hR,sR,oR,tR,nR,vuR]=await Promise.all([supabaseClient.from('vendors').select('*'),supabaseClient.from('vendor_notes').select('*'),supabaseClient.from('global_products').select('*'),supabaseClient.from('case_handlers').select('*'),supabaseClient.from('schedules').select('*'),supabaseClient.from('orders').select('*'),supabaseClient.from('order_tasks').select('*'),supabaseClient.from('order_notes').select('*'),supabaseClient.from('vendor_users').select('*')]);setVendors((vR.data||[]).map(v=>transformVendor(v,vnR.data||[])));setGlobalProducts((pR.data||[]).map(transformProduct));setCaseHandlers((hR.data||[]).map(transformHandler));setSchedules(transformSchedules(sR.data));setOrders((oR.data||[]).map(o=>transformOrder(o,tR.data||[],nR.data||[])));setVendorUsers(transformVendorUsers(vuR.data));};load();},[auth]);
+  const handleLogout=async()=>{await supabaseClient.auth.signOut();setAuth(null);};
+  if(appLoading) return <div className="min-h-screen bg-gradient-to-br from-blue-600 to-blue-800 flex items-center justify-center"><div className="text-white text-xl">載入中...</div></div>;
   if(!auth) return <LoginPage onLogin={setAuth}/>;
   const activeVendors=vendors.filter(v=>v.status!=='inactive');
   if(auth.role!=='admin'){
-    return <VendorPortal auth={auth} vendor={vendors.find(v=>v.id===auth.vendorId)} orders={orders.filter(o=>o.vendorId===auth.vendorId)} setOrders={setOrders} allOrders={orders} caseHandlers={caseHandlers.filter(ch=>ch.vendorId===auth.vendorId)} schedules={schedules} setSchedules={setSchedules} globalProducts={globalProducts} onLogout={()=>setAuth(null)}/>;
+    return <VendorPortal auth={auth} vendor={vendors.find(v=>v.id===auth.vendorId)} orders={orders.filter(o=>o.vendorId===auth.vendorId)} setOrders={setOrders} allOrders={orders} caseHandlers={caseHandlers.filter(ch=>ch.vendorId===auth.vendorId)} schedules={schedules} setSchedules={setSchedules} globalProducts={globalProducts} onLogout={handleLogout}/>;
   }
   const NavBtn=({id,label})=><button onClick={()=>setTab(id)} className={`px-3 py-2 rounded text-left text-sm w-full ${tab===id?'bg-blue-800':'hover:bg-blue-500'}`}>{label}</button>;
   return (
@@ -166,7 +258,7 @@ function App() {
         <NavBtn id="handlers" label="🧑‍🔧 施工人員"/>
         <NavBtn id="users" label="👤 廠商帳號"/>
         <div className="mt-auto pt-4 border-t border-blue-500">
-          <button onClick={()=>setAuth(null)} className="px-3 py-2 rounded text-left text-sm hover:bg-blue-500 w-full">🚪 登出</button>
+          <button onClick={handleLogout} className="px-3 py-2 rounded text-left text-sm hover:bg-blue-500 w-full">🚪 登出</button>
         </div>
       </nav>
       <div className="flex-1 overflow-auto">
@@ -206,8 +298,8 @@ function OrdersPage({orders,setOrders,vendors,globalProducts,caseHandlers}) {
   const filtered=orders.filter(o=>{if(filters.vendor&&o.vendorId!==filters.vendor)return false;if(filters.dateFrom&&o.createdAt<filters.dateFrom.replace(/-/g,'/'))return false;if(filters.dateTo&&o.createdAt>filters.dateTo.replace(/-/g,'/'))return false;if(filters.source&&o.source!==filters.source)return false;if(filters.paymentMethod&&o.paymentMethod!==filters.paymentMethod)return false;if(filters.status&&o.status!==filters.status)return false;return true;});
   const sourcesSet=[...new Set(orders.map(o=>o.source))];const methodsSet=[...new Set(orders.map(o=>o.paymentMethod))];
   const startEdit=(order)=>{setEditingId(order.id);setEditData(JSON.parse(JSON.stringify(order)));};
-  const saveEdit=()=>{if(editData){setOrders(orders.map(o=>o.id===editingId?editData:o));setEditingId(null);setEditData(null);}};
-  const createOrder=(newOrder)=>{setOrders([...orders,newOrder]);setCreating(false);};
+  const saveEdit=async()=>{if(editData){setOrders(orders.map(o=>o.id===editingId?editData:o));setEditingId(null);setEditData(null);await supabaseClient.from('orders').update(orderToDb(editData)).eq('id',editingId);await supabaseClient.from('order_tasks').delete().eq('order_id',editingId);for(const t of editData.tasks)await supabaseClient.from('order_tasks').insert(taskToDb(t,editingId));}};
+  const createOrder=async(newOrder)=>{setOrders([...orders,newOrder]);setCreating(false);await supabaseClient.from('orders').insert(orderToDb(newOrder));for(const t of newOrder.tasks)await supabaseClient.from('order_tasks').insert(taskToDb(t,newOrder.id));};
   if(quotePrintOrder) return <QuotePrintView order={quotePrintOrder} globalProducts={globalProducts} vendors={vendors} onBack={()=>setQuotePrintOrder(null)}/>;
   return (
     <div className="p-6">
@@ -231,7 +323,7 @@ function OrdersPage({orders,setOrders,vendors,globalProducts,caseHandlers}) {
 }
 function OrderDetailView({order,vendors,globalProducts,caseHandlers,onEdit,onQuote,setOrders,orders}) {
   const [noteText,setNoteText]=useState('');const textareaRef=useRef(null);
-  const addNote=()=>{if(!noteText.trim())return;setOrders(orders.map(o=>o.id===order.id?{...o,notes:[...o.notes,{id:mkId('n'),text:noteText.trim(),createdAt:new Date().toLocaleString('zh-TW')}]}:o));setNoteText('');};
+  const addNote=async()=>{if(!noteText.trim())return;const note={id:mkId('n'),text:noteText.trim(),createdAt:new Date().toLocaleString('zh-TW')};setOrders(orders.map(o=>o.id===order.id?{...o,notes:[...o.notes,note]}:o));setNoteText('');await supabaseClient.from('order_notes').insert({id:note.id,order_id:order.id,text:note.text,created_at:note.createdAt});};
   const insertEmoji=(emoji)=>{const ta=textareaRef.current;if(ta){const s=ta.selectionStart,e=ta.selectionEnd;const nv=noteText.slice(0,s)+emoji+noteText.slice(e);setNoteText(nv);setTimeout(()=>{ta.focus();ta.setSelectionRange(s+emoji.length,s+emoji.length);},0);}else setNoteText(noteText+emoji);};
   const total=order.tasks.reduce((s,t)=>s+(t.totalPrice||0),0);
   return (
@@ -379,7 +471,7 @@ function VendorHandlersView({caseHandlers,schedules,globalProducts}) {
   return (<div className="p-6"><h2 className="text-2xl font-bold mb-4">🧑‍🔧 施工人員</h2><div className="space-y-4">{caseHandlers.map(h=>(<div key={h.id} className="bg-white rounded shadow p-4"><div className="font-bold text-lg">{h.name}</div><div className="text-sm text-gray-600">{h.phone} | {h.email}</div><div className="text-sm mt-1"><span className="font-medium">服務地區：</span>{h.regions.join(', ')||'未設定'}</div><div className="text-sm mt-1"><span className="font-medium">可用日：</span>{Object.entries(schedules[h.id]||{}).filter(([,v])=>v==='available').map(([d])=>d).join(', ')||'未設定'}</div></div>))}</div></div>);
 }
 function VendorScheduleView({caseHandlers,schedules,setSchedules}) {
-  const toggleDate=(hid,date)=>{const c=schedules[hid]?.[date];setSchedules({...schedules,[hid]:{...schedules[hid],[date]:c==='available'?'busy':'available'}});};
+  const toggleDate=async(hid,date)=>{const c=schedules[hid]?.[date];const ns=c==='available'?'busy':'available';setSchedules({...schedules,[hid]:{...schedules[hid],[date]:ns}});await supabaseClient.from('schedules').upsert({handler_id:hid,date,status:ns},{onConflict:'handler_id,date'});};
   const dates=['2026/03/22','2026/03/23','2026/03/24','2026/03/25','2026/03/26','2026/03/27','2026/03/28','2026/03/29','2026/03/30','2026/03/31'];
   return (<div className="p-6"><h2 className="text-2xl font-bold mb-4">🗓️ 排程管理</h2><div className="space-y-4">{caseHandlers.map(h=>(<div key={h.id} className="bg-white rounded shadow p-4"><div className="font-medium mb-3">{h.name}</div><div className="grid grid-cols-5 gap-2">{dates.map(date=>{const s=schedules[h.id]?.[date]||'unknown';const bg=s==='available'?'#d1fae5':s==='busy'?'#fee2e2':'#f3f4f6';return(<button key={date} onClick={()=>toggleDate(h.id,date)} style={{background:bg}} className="px-2 py-2 rounded text-xs font-medium text-center">{date.slice(5)}<br/><span>{s==='available'?'可用':s==='busy'?'忙碌':'未定'}</span></button>);})}</div></div>))}</div></div>);
 }
@@ -389,9 +481,9 @@ function AssignmentPage({orders,setOrders,vendors,caseHandlers,globalProducts}) 
   const [editingTask,setEditingTask]=useState(null);const [creating,setCreating]=useState(false);
   const allTasks=orders.flatMap(order=>order.tasks.map(task=>({...task,orderId:order.id,orderNo:order.orderNo,customerName:order.customerName,createdAt:order.createdAt,vendorId:order.vendorId,handlerId:order.handlerId,orderStatus:order.status})));
   const filtered=allTasks.filter(t=>{if(filters.vendor&&t.vendorId!==filters.vendor)return false;if(filters.handler&&t.handlerId!==filters.handler)return false;if(filters.status&&t.orderStatus!==filters.status)return false;if(filters.dateFrom&&t.startDate<filters.dateFrom.replace(/-/g,'/'))return false;if(filters.dateTo&&t.startDate>filters.dateTo.replace(/-/g,'/'))return false;return true;});
-  const saveTask=(updated)=>{setOrders(orders.map(order=>{if(order.id!==updated.orderId)return order;return {...order,vendorId:updated.vendorId,handlerId:updated.handlerId,status:updated.orderStatus,tasks:order.tasks.map(t=>t.id!==updated.id?t:{...t,productId:updated.productId,qty:updated.qty||1,unitPrice:updated.unitPrice||0,totalPrice:updated.totalPrice||0,startDate:updated.startDate,startTime:updated.startTime,endDate:updated.endDate,endTime:updated.endTime})};}));setEditingTask(null);};
-  const deleteTask=(task)=>{if(!window.confirm(`確定刪除「${task.customerName}」的此任務？`))return;const upd=orders.map(order=>{if(order.id!==task.orderId)return order;return{...order,tasks:order.tasks.filter(t=>t.id!==task.id)};}).filter(order=>order.tasks.length>0);setOrders(upd);};
-  const createTask=(data)=>{const nextNum=String(orders.length+1).padStart(3,'0');const newOrder={id:mkId('o'),orderNo:`ORD-${new Date().getFullYear()}-${nextNum}`,status:data.orderStatus||'pending',createdAt:new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit'}).replace(/\//g,'/'),source:'派案系統',paymentMethod:'未定',customerName:data.customerName,phone:data.phone||'',email:'',taxId:'',invoiceTitle:'',city:'',district:'',address:'',vendorId:data.vendorId||'',handlerId:data.handlerId||'',tasks:[{id:mkTaskId(),sameAsCustomer:true,contactName:'',contactPhone:'',contactCity:'',contactDistrict:'',contactAddress:'',productId:data.productId||'',qty:data.qty||1,unitPrice:data.unitPrice||0,totalPrice:data.totalPrice||0,startDate:data.startDate||'',startTime:data.startTime||'09:00',endDate:data.startDate||'',endTime:data.endTime||'18:00'}],notes:[]};setOrders([...orders,newOrder]);setCreating(false);};
+  const saveTask=async(updated)=>{setOrders(orders.map(order=>{if(order.id!==updated.orderId)return order;return {...order,vendorId:updated.vendorId,handlerId:updated.handlerId,status:updated.orderStatus,tasks:order.tasks.map(t=>t.id!==updated.id?t:{...t,productId:updated.productId,qty:updated.qty||1,unitPrice:updated.unitPrice||0,totalPrice:updated.totalPrice||0,startDate:updated.startDate,startTime:updated.startTime,endDate:updated.endDate,endTime:updated.endTime})};}));setEditingTask(null);await supabaseClient.from('orders').update({vendor_id:updated.vendorId,handler_id:updated.handlerId,status:updated.orderStatus}).eq('id',updated.orderId);await supabaseClient.from('order_tasks').update({product_id:updated.productId,qty:updated.qty||1,unit_price:updated.unitPrice||0,total_price:updated.totalPrice||0,start_date:updated.startDate,start_time:updated.startTime,end_date:updated.endDate,end_time:updated.endTime}).eq('id',updated.id);};
+  const deleteTask=async(task)=>{if(!window.confirm(`確定刪除「${task.customerName}」的此任務？`))return;const upd=orders.map(order=>{if(order.id!==task.orderId)return order;return{...order,tasks:order.tasks.filter(t=>t.id!==task.id)};}).filter(order=>order.tasks.length>0);setOrders(upd);await supabaseClient.from('order_tasks').delete().eq('id',task.id);if(!upd.find(o=>o.id===task.orderId))await supabaseClient.from('orders').delete().eq('id',task.orderId);};
+  const createTask=async(data)=>{const nextNum=String(orders.length+1).padStart(3,'0');const newOrder={id:mkId('o'),orderNo:`ORD-${new Date().getFullYear()}-${nextNum}`,status:data.orderStatus||'pending',createdAt:new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit'}).replace(/\//g,'/'),source:'派案系統',paymentMethod:'未定',customerName:data.customerName,phone:data.phone||'',email:'',taxId:'',invoiceTitle:'',city:'',district:'',address:'',vendorId:data.vendorId||'',handlerId:data.handlerId||'',tasks:[{id:mkTaskId(),sameAsCustomer:true,contactName:'',contactPhone:'',contactCity:'',contactDistrict:'',contactAddress:'',productId:data.productId||'',qty:data.qty||1,unitPrice:data.unitPrice||0,totalPrice:data.totalPrice||0,startDate:data.startDate||'',startTime:data.startTime||'09:00',endDate:data.startDate||'',endTime:data.endTime||'18:00'}],notes:[]};setOrders([...orders,newOrder]);setCreating(false);await supabaseClient.from('orders').insert(orderToDb(newOrder));for(const t of newOrder.tasks)await supabaseClient.from('order_tasks').insert(taskToDb(t,newOrder.id));};
   return (
     <div className="p-6">
       <div className="flex justify-between items-center mb-4"><h2 className="text-2xl font-bold">👥 派案管理</h2><button onClick={()=>setCreating(!creating)} className="bg-green-500 text-white px-4 py-2 rounded text-sm">＋ 新增任務</button></div>
@@ -423,7 +515,7 @@ function AssignmentCreateForm({vendors,globalProducts,caseHandlers,onSave,onCanc
 
 function VendorNotes({vendor,setVendors,vendors}) {
   const [open,setOpen]=useState(false);const [noteText,setNoteText]=useState('');const taRef=useRef(null);
-  const addNote=()=>{if(!noteText.trim())return;const note={id:mkId('vn'),text:noteText.trim(),createdAt:new Date().toLocaleString('zh-TW')};setVendors(vendors.map(v=>v.id===vendor.id?{...v,notes:[...(v.notes||[]),note]}:v));setNoteText('');};
+  const addNote=async()=>{if(!noteText.trim())return;const note={id:mkId('vn'),text:noteText.trim(),createdAt:new Date().toLocaleString('zh-TW')};setVendors(vendors.map(v=>v.id===vendor.id?{...v,notes:[...(v.notes||[]),note]}:v));setNoteText('');await supabaseClient.from('vendor_notes').insert({id:note.id,vendor_id:vendor.id,text:note.text,created_at:note.createdAt});};
   const insertEmoji=(emoji)=>{const ta=taRef.current;if(ta){const s=ta.selectionStart,e=ta.selectionEnd;const nv=noteText.slice(0,s)+emoji+noteText.slice(e);setNoteText(nv);setTimeout(()=>{ta.focus();ta.setSelectionRange(s+emoji.length,s+emoji.length);},0);}else setNoteText(noteText+emoji);};
   return (<div className="border border-gray-100 rounded"><button onClick={()=>setOpen(!open)} className="w-full flex justify-between items-center px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">📝 往來記錄（{(vendor.notes||[]).length} 筆）<span>{open?'▲':'▼'}</span></button>{open&&(<div className="px-3 pb-3">{(vendor.notes||[]).map(n=>(<div key={n.id} className="bg-gray-50 p-2 rounded border border-gray-200 text-sm mb-2"><div>{n.text}</div><div className="text-xs text-gray-400 mt-1">{n.createdAt}</div></div>))}<div className="flex gap-2 items-end mt-2"><div className="flex-1"><textarea ref={taRef} value={noteText} onChange={e=>setNoteText(e.target.value)} placeholder="輸入往來記錄..." className="w-full border border-gray-300 rounded px-3 py-2 text-sm resize-none" rows={2}/></div><div className="flex flex-col gap-1"><EmojiPicker onSelect={insertEmoji}/><button onClick={addNote} className="bg-blue-500 text-white px-3 py-1 rounded text-sm">新增</button></div></div></div>)}</div>);
 }
@@ -488,11 +580,11 @@ function VendorManagementPage({vendors,setVendors,globalProducts,orders}) {
   const [newVendor,setNewVendor]=useState(null);const [detailId,setDetailId]=useState(null);
   const categoriesSet=new Set();globalProducts.forEach(p=>categoriesSet.add(p.category));
   const filtered=vendors.filter(v=>{if(filters.nameSearch&&!v.name.includes(filters.nameSearch))return false;if(filters.category&&!(v.categories||[]).includes(filters.category))return false;if(filters.status&&v.status!==filters.status)return false;return true;});
-  const toggleStatus=(vid)=>setVendors(vendors.map(v=>v.id===vid?{...v,status:v.status==='inactive'?'active':'inactive'}:v));
-  const deleteVendor=(vid)=>{if(!window.confirm('確定刪除此供應商？'))return;setVendors(vendors.filter(v=>v.id!==vid));};
+  const toggleStatus=async(vid)=>{const ns=vendors.find(v=>v.id===vid)?.status==='inactive'?'active':'inactive';setVendors(vendors.map(v=>v.id===vid?{...v,status:ns}:v));await supabaseClient.from('vendors').update({status:ns}).eq('id',vid);};
+  const deleteVendor=async(vid)=>{if(!window.confirm('確定刪除此供應商？'))return;setVendors(vendors.filter(v=>v.id!==vid));await supabaseClient.from('vendors').delete().eq('id',vid);};
   const startEdit=(vendor)=>{setEditingId(vendor.id);setEditData({...vendor,categories:[...(vendor.categories||[])],regions:[...(vendor.regions||[])]});};
-  const saveEdit=()=>{if(editData){setVendors(vendors.map(v=>v.id===editingId?editData:v));setEditingId(null);setEditData(null);}};
-  const addVendor=()=>{setVendors([...vendors,{...newVendor,id:mkId('v'),status:'active',notes:[]}]);setNewVendor(null);};
+  const saveEdit=async()=>{if(editData){setVendors(vendors.map(v=>v.id===editingId?editData:v));setEditingId(null);setEditData(null);await supabaseClient.from('vendors').update(vendorToDb(editData)).eq('id',editingId);}};
+  const addVendor=async()=>{const nv={...newVendor,id:mkId('v'),status:'active',notes:[]};setVendors([...vendors,nv]);setNewVendor(null);await supabaseClient.from('vendors').insert(vendorToDb(nv));};
   const defVendor={name:'',contact:'',phone:'',email:'',taxId:'',address:'',bankName:'',bankAccount:'',paymentTerms:'月結30天',contractStart:'',contractEnd:'',categories:[],regions:[]};
   const payTerms=['月結30天','月結60天','月結90天','即期付款','預付'];
   const VForm=({data,setData,onSave,onCancel})=>(
@@ -560,9 +652,9 @@ function ProductsPage({globalProducts,setGlobalProducts,vendors}) {
   const categoriesSet=new Set(globalProducts.map(p=>p.category));
   const filtered=globalProducts.filter(p=>{if(filters.category&&p.category!==filters.category)return false;if(filters.vendor&&p.vendorId!==filters.vendor)return false;const m=parseFloat(gm(p));if(filters.marginMin&&m<parseFloat(filters.marginMin))return false;if(filters.marginMax&&m>parseFloat(filters.marginMax))return false;return true;});
   const startEdit=(p)=>{setEditingId(p.id);setEditData({...p});};
-  const saveEdit=()=>{if(editData){setGlobalProducts(globalProducts.map(p=>p.id===editingId?editData:p));setEditingId(null);setEditData(null);}};
-  const deleteProduct=(id)=>{if(window.confirm('確定刪除此產品？'))setGlobalProducts(globalProducts.filter(p=>p.id!==id));};
-  const addProduct=()=>{setGlobalProducts([...globalProducts,{id:mkId('gp'),category:newProduct.category,name:newProduct.name,retailPrice:parseFloat(newProduct.retailPrice)||0,purchasePrice:parseFloat(newProduct.purchasePrice)||0,commissionAmount:parseFloat(newProduct.commissionAmount)||0,profitMode:newProduct.profitMode||'price',vendorId:newProduct.vendorId,note:newProduct.note||''}]);setNewProduct(null);};
+  const saveEdit=async()=>{if(editData){setGlobalProducts(globalProducts.map(p=>p.id===editingId?editData:p));setEditingId(null);setEditData(null);await supabaseClient.from('global_products').update(productToDb(editData)).eq('id',editingId);}};
+  const deleteProduct=async(id)=>{if(window.confirm('確定刪除此產品？')){setGlobalProducts(globalProducts.filter(p=>p.id!==id));await supabaseClient.from('global_products').delete().eq('id',id);}};
+  const addProduct=async()=>{const np={id:mkId('gp'),category:newProduct.category,name:newProduct.name,retailPrice:parseFloat(newProduct.retailPrice)||0,purchasePrice:parseFloat(newProduct.purchasePrice)||0,commissionAmount:parseFloat(newProduct.commissionAmount)||0,profitMode:newProduct.profitMode||'price',vendorId:newProduct.vendorId,note:newProduct.note||''};setGlobalProducts([...globalProducts,np]);setNewProduct(null);await supabaseClient.from('global_products').insert(productToDb(np));};
   const CatSelect=({value,onChange})=>(<div className="flex flex-col gap-1"><label className="text-sm font-medium text-gray-700">類別</label><select value={value} onChange={e=>onChange(e.target.value)} className="border border-gray-300 rounded px-3 py-2 text-sm"><option value="">-- 選擇類別 --</option>{allCats.map(c=><option key={c} value={c}>{c}</option>)}</select></div>);
   const ProfitModeForm=({data,setData})=>(<div className="col-span-3"><label className="text-sm font-medium text-gray-700 block mb-2">分潤模式</label><div className="flex gap-4 mb-2"><label className="flex items-center gap-2 text-sm cursor-pointer"><input type="radio" checked={data.profitMode==='price'} onChange={()=>setData({...data,profitMode:'price'})}/> 模式一：供應商供貨價</label><label className="flex items-center gap-2 text-sm cursor-pointer"><input type="radio" checked={data.profitMode==='commission'} onChange={()=>setData({...data,profitMode:'commission'})}/> 模式二：供應商抽成金額</label></div>{data.profitMode==='price'&&<Input label="採購價 (NT$)" type="number" value={data.purchasePrice||0} onChange={v=>setData({...data,purchasePrice:parseFloat(v)||0})}/>}{data.profitMode==='commission'&&<Input label="抽成金額 (NT$)" type="number" value={data.commissionAmount||0} onChange={v=>setData({...data,commissionAmount:parseFloat(v)||0})}/>}</div>);
   const ProfitPreview=({data})=>{if(!data||!data.retailPrice||data.retailPrice<=0)return null;const calc=profitCalc(data);const margin=gm(data);return(<div className="col-span-3 bg-gradient-to-r from-blue-50 to-green-50 p-3 rounded border border-blue-100"><div className="text-xs text-gray-500 mb-2 font-medium">💰 分潤試算（每賣出 1 件）</div><div className="grid grid-cols-4 gap-2 text-center text-sm"><div><div className="text-xs text-gray-400">終端售價</div><div className="font-bold">NT${Number(data.retailPrice).toLocaleString()}</div></div><div><div className="text-xs text-gray-400">需付供應商</div><div className="font-bold text-orange-600">NT${calc.toVendor.toLocaleString()}</div></div><div><div className="text-xs text-gray-400">我方獲得</div><div className="font-bold text-green-600">NT${calc.ourProfit.toLocaleString()}</div></div><div><div className="text-xs text-gray-400">毛利率</div><span style={gmStyle(margin)} className="px-2 py-0.5 rounded font-bold inline-block">{margin}%</span></div></div></div>);};
@@ -586,9 +678,9 @@ function ProductsPage({globalProducts,setGlobalProducts,vendors}) {
 function HandlersPage({caseHandlers,setCaseHandlers,vendors,schedules,setSchedules,globalProducts}) {
   const [expandedId,setExpandedId]=useState(null);const [editingId,setEditingId]=useState(null);const [editData,setEditData]=useState(null);const [newHandler,setNewHandler]=useState(null);
   const startEdit=(h)=>{setEditingId(h.id);setEditData({...h});};
-  const saveEdit=()=>{if(editData){setCaseHandlers(caseHandlers.map(ch=>ch.id===editingId?editData:ch));setEditingId(null);setEditData(null);}};
-  const addHandler=()=>{const nh={id:mkId('ch'),vendorId:newHandler.vendorId,name:newHandler.name,phone:newHandler.phone,email:newHandler.email,productIds:[],regions:[]};setCaseHandlers([...caseHandlers,nh]);setSchedules({...schedules,[nh.id]:{}});setNewHandler(null);};
-  const toggleDate=(hid,date)=>{const c=schedules[hid]?.[date];setSchedules({...schedules,[hid]:{...schedules[hid],[date]:c==='available'?'busy':'available'}});};
+  const saveEdit=async()=>{if(editData){setCaseHandlers(caseHandlers.map(ch=>ch.id===editingId?editData:ch));setEditingId(null);setEditData(null);await supabaseClient.from('case_handlers').update(handlerToDb(editData)).eq('id',editingId);}};
+  const addHandler=async()=>{const nh={id:mkId('ch'),vendorId:newHandler.vendorId,name:newHandler.name,phone:newHandler.phone,email:newHandler.email,productIds:[],regions:[]};setCaseHandlers([...caseHandlers,nh]);setSchedules({...schedules,[nh.id]:{}});setNewHandler(null);await supabaseClient.from('case_handlers').insert(handlerToDb(nh));};
+  const toggleDate=async(hid,date)=>{const c=schedules[hid]?.[date];const ns=c==='available'?'busy':'available';setSchedules({...schedules,[hid]:{...schedules[hid],[date]:ns}});await supabaseClient.from('schedules').upsert({handler_id:hid,date,status:ns},{onConflict:'handler_id,date'});};
   const dates=['2026/03/22','2026/03/23','2026/03/24','2026/03/25','2026/03/26','2026/03/27','2026/03/28'];
   return (
     <div className="p-6">
@@ -607,8 +699,8 @@ function HandlersPage({caseHandlers,setCaseHandlers,vendors,schedules,setSchedul
 function UsersPage({vendorUsers,setVendorUsers,vendors}) {
   const [expandedId,setExpandedId]=useState(null);const [editingId,setEditingId]=useState(null);const [editData,setEditData]=useState(null);const [newUser,setNewUser]=useState(null);
   const startEdit=(user,vid)=>{setEditingId(user.id);setEditData({...user,vendorId:vid});};
-  const saveEdit=()=>{if(editData){const vid=editData.vendorId;setVendorUsers({...vendorUsers,[vid]:(vendorUsers[vid]||[]).map(u=>u.id===editingId?{id:u.id,name:editData.name,email:editData.email,permissions:editData.permissions}:u)});setEditingId(null);setEditData(null);}};
-  const addUser=()=>{const nu={id:mkId('vu'),name:newUser.name,email:newUser.email,permissions:newUser.permissions||['view']};const vid=newUser.vendorId;setVendorUsers({...vendorUsers,[vid]:[...(vendorUsers[vid]||[]),nu]});setNewUser(null);};
+  const saveEdit=async()=>{if(editData){const vid=editData.vendorId;setVendorUsers({...vendorUsers,[vid]:(vendorUsers[vid]||[]).map(u=>u.id===editingId?{id:u.id,name:editData.name,email:editData.email,permissions:editData.permissions}:u)});setEditingId(null);setEditData(null);await supabaseClient.from('vendor_users').update({name:editData.name,email:editData.email,permissions:editData.permissions}).eq('id',editingId);}};
+  const addUser=async()=>{const nu={id:mkId('vu'),name:newUser.name,email:newUser.email,permissions:newUser.permissions||['view']};const vid=newUser.vendorId;setVendorUsers({...vendorUsers,[vid]:[...(vendorUsers[vid]||[]),nu]});setNewUser(null);await supabaseClient.from('vendor_users').insert({id:nu.id,vendor_id:vid,name:nu.name,email:nu.email,permissions:nu.permissions});};
   return (
     <div className="p-6">
       <h2 className="text-2xl font-bold mb-4">👤 廠商帳號管理</h2>
