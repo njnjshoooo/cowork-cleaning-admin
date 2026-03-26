@@ -28,18 +28,15 @@ const supabaseClient = window.supabase.createClient(
 );
 
 const ORDER_STATUSES = [
-  { id:'pending',    label:'待確認',     bg:'#fef9c3', color:'#854d0e' },
-  { id:'confirmed',  label:'已確認',     bg:'#dbeafe', color:'#1e40af' },
-  { id:'assigned',   label:'已派案',     bg:'#e0e7ff', color:'#3730a3' },
-  { id:'scheduling', label:'排程中',     bg:'#fce7f3', color:'#9d174d' },
-  { id:'inProgress', label:'進行中',     bg:'#d1fae5', color:'#065f46' },
-  { id:'completed',  label:'已完成',     bg:'#dcfce7', color:'#166534' },
-  { id:'cancelled',  label:'已取消',     bg:'#fee2e2', color:'#991b1b' },
-  { id:'onHold',     label:'暫停',       bg:'#f3f4f6', color:'#374151' },
-  { id:'invoiced',   label:'已開立發票', bg:'#ffedd5', color:'#9a3412' },
-  { id:'paid',       label:'已付款',     bg:'#d1fae5', color:'#065f46' },
-  { id:'disputed',   label:'爭議中',     bg:'#fef3c7', color:'#92400e' },
-  { id:'refunded',   label:'已退款',     bg:'#ede9fe', color:'#5b21b6' },
+  { id:'incoming',     label:'進單',     bg:'#fef9c3', color:'#854d0e' },
+  { id:'quoting',      label:'估價中',   bg:'#dbeafe', color:'#1e40af' },
+  { id:'quote_sent',   label:'已送報價', bg:'#e0e7ff', color:'#3730a3' },
+  { id:'deposit_paid', label:'已付定金', bg:'#fce7f3', color:'#9d174d' },
+  { id:'assigned',     label:'已派案',   bg:'#c7d2fe', color:'#4338ca' },
+  { id:'final_paid',   label:'已付尾款', bg:'#d1fae5', color:'#065f46' },
+  { id:'disputed',     label:'爭議處理', bg:'#ffedd5', color:'#9a3412' },
+  { id:'cancelled',    label:'取消',     bg:'#fee2e2', color:'#991b1b' },
+  { id:'refunded',     label:'退款',     bg:'#ede9fe', color:'#5b21b6' },
 ];
 const STATUS_MAP = Object.fromEntries(ORDER_STATUSES.map(s=>[s.id,s]));
 const REGIONS = ['台北市','新北市','桃園市','台中市','台南市','高雄市','基隆市','新竹市','嘉義市','新竹縣','苗栗縣','彰化縣','南投縣','雲林縣','嘉義縣','屏東縣','宜蘭縣','花蓮縣','台東縣'];
@@ -96,7 +93,7 @@ const transformOrder = (o, tasks, notes) => ({
   source:o.source, paymentMethod:o.payment_method, customerName:o.customer_name,
   phone:o.phone, email:o.email||'', taxId:o.tax_id||'', invoiceTitle:o.invoice_title||'',
   city:o.city, district:o.district, address:o.address,
-  vendorId:o.vendor_id||'', handlerId:o.handler_id||'',
+  vendorId:o.vendor_id||'', handlerId:o.handler_id||'', salesperson:o.salesperson||'',
   tasks:(tasks||[]).filter(t=>t.order_id===o.id).map(transformTask),
   notes:(notes||[]).filter(n=>n.order_id===o.id).map(n=>({id:n.id,text:n.text,createdAt:n.created_at}))
 });
@@ -119,7 +116,7 @@ const orderToDb = (o) => ({
   source:o.source, payment_method:o.paymentMethod, customer_name:o.customerName,
   phone:o.phone, email:o.email, tax_id:o.taxId, invoice_title:o.invoiceTitle,
   city:o.city, district:o.district, address:o.address,
-  vendor_id:o.vendorId, handler_id:o.handlerId
+  vendor_id:o.vendorId, handler_id:o.handlerId, salesperson:o.salesperson||''
 });
 const taskToDb = (t, orderId) => ({
   id:t.id, order_id:orderId, same_as_customer:t.sameAsCustomer,
@@ -219,9 +216,9 @@ function LoginPage({onLogin}) {
   const handleLogin=async()=>{setLoading(true);setError('');
     const {data,error:authErr}=await supabaseClient.auth.signInWithPassword({email,password});
     if(authErr){setError('登入失敗：'+authErr.message);setLoading(false);return;}
-    const {data:profile}=await supabaseClient.from('app_users').select('role,vendor_id').eq('id',data.user.id).single();
+    const {data:profile}=await supabaseClient.from('app_users').select('role,vendor_id,display_name').eq('id',data.user.id).single();
     if(!profile){setError('找不到使用者角色，請聯繫管理員');setLoading(false);return;}
-    onLogin({role:profile.role,vendorId:profile.vendor_id});setLoading(false);
+    onLogin({role:profile.role,vendorId:profile.vendor_id,displayName:profile.display_name||''});setLoading(false);
   };
   return (<div className="min-h-screen bg-gradient-to-br from-blue-600 to-blue-800 flex items-center justify-center"><div className="bg-white rounded-2xl shadow-2xl p-8 w-96"><h1 className="text-2xl font-bold text-center text-blue-700 mb-6">🏢 供應商管理後台</h1><div className="mb-4"><label className="text-sm font-medium text-gray-700 block mb-1">Email</label><input type="email" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleLogin()} placeholder="your@email.com" className="w-full border border-gray-300 rounded px-3 py-2 text-sm"/></div><div className="mb-4"><label className="text-sm font-medium text-gray-700 block mb-1">密碼</label><input type="password" value={password} onChange={e=>setPassword(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleLogin()} placeholder="輸入密碼" className="w-full border border-gray-300 rounded px-3 py-2 text-sm"/></div>{error&&<div className="text-red-500 text-sm mb-4 bg-red-50 p-2 rounded">{error}</div>}<button onClick={handleLogin} disabled={loading} className="w-full bg-blue-600 text-white py-2 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50">{loading?'登入中...':'登入'}</button></div></div>);
 }
@@ -234,7 +231,7 @@ function App() {
   const [schedules,setSchedules]=useState({});
   const [vendorUsers,setVendorUsers]=useState({});
   const [orders,setOrders]=useState([]);
-  useEffect(()=>{supabaseClient.auth.getSession().then(async({data:{session}})=>{if(session){const{data:profile}=await supabaseClient.from('app_users').select('role,vendor_id').eq('id',session.user.id).single();if(profile)setAuth({role:profile.role,vendorId:profile.vendor_id});}setAppLoading(false);});},[]);
+  useEffect(()=>{supabaseClient.auth.getSession().then(async({data:{session}})=>{if(session){const{data:profile}=await supabaseClient.from('app_users').select('role,vendor_id,display_name').eq('id',session.user.id).single();if(profile)setAuth({role:profile.role,vendorId:profile.vendor_id,displayName:profile.display_name||''});}setAppLoading(false);});},[]);
   useEffect(()=>{if(!auth)return;const load=async()=>{const[vR,vnR,pR,hR,sR,oR,tR,nR,vuR]=await Promise.all([supabaseClient.from('vendors').select('*'),supabaseClient.from('vendor_notes').select('*'),supabaseClient.from('global_products').select('*'),supabaseClient.from('case_handlers').select('*'),supabaseClient.from('schedules').select('*'),supabaseClient.from('orders').select('*'),supabaseClient.from('order_tasks').select('*'),supabaseClient.from('order_notes').select('*'),supabaseClient.from('vendor_users').select('*')]);setVendors((vR.data||[]).map(v=>transformVendor(v,vnR.data||[])));setGlobalProducts((pR.data||[]).map(transformProduct));setCaseHandlers((hR.data||[]).map(transformHandler));setSchedules(transformSchedules(sR.data));setOrders((oR.data||[]).map(o=>transformOrder(o,tR.data||[],nR.data||[])));setVendorUsers(transformVendorUsers(vuR.data));};load();},[auth]);
   const handleLogout=async()=>{await supabaseClient.auth.signOut();setAuth(null);};
   if(appLoading) return <div className="min-h-screen bg-gradient-to-br from-blue-600 to-blue-800 flex items-center justify-center"><div className="text-white text-xl">載入中...</div></div>;
@@ -262,7 +259,7 @@ function App() {
         </div>
       </nav>
       <div className="flex-1 overflow-auto">
-        {tab==='orders'     && <OrdersPage orders={orders} setOrders={setOrders} vendors={activeVendors} globalProducts={globalProducts} caseHandlers={caseHandlers}/>}
+        {tab==='orders'     && <OrdersPage orders={orders} setOrders={setOrders} vendors={activeVendors} globalProducts={globalProducts} caseHandlers={caseHandlers} auth={auth}/>}
         {tab==='assignment' && <AssignmentPage orders={orders} setOrders={setOrders} vendors={activeVendors} caseHandlers={caseHandlers} globalProducts={globalProducts}/>}
         {tab==='vendors'    && <VendorManagementPage vendors={vendors} setVendors={setVendors} globalProducts={globalProducts} orders={orders}/>}
         {tab==='products'   && <ProductsPage globalProducts={globalProducts} setGlobalProducts={setGlobalProducts} vendors={vendors}/>}
@@ -291,8 +288,14 @@ function ProductComboBox({globalProducts,value,onChange}) {
   const display=selected?`[${selected.category}] ${selected.name} — NT$${selected.retailPrice}`:'選擇商品';
   return (<div className="relative" ref={ref}><button type="button" onClick={()=>setOpen(!open)} className="border border-gray-300 rounded px-3 py-2 w-full text-left text-sm bg-white truncate">{display}</button>{open&&(<div className="absolute top-10 left-0 right-0 bg-white border border-gray-300 rounded shadow-lg z-50 max-h-64 overflow-y-auto">{globalProducts.map(p=>{const m=gm(p);return(<button type="button" key={p.id} onClick={()=>{onChange(p.id);setOpen(false);}} className="w-full text-left px-3 py-2 hover:bg-blue-50 text-sm flex justify-between items-center gap-2"><span className="truncate">[{p.category}] {p.name} — NT${p.retailPrice}</span><span style={gmStyle(m)} className="px-2 py-0.5 rounded text-xs shrink-0">{m}%</span></button>);})}</div>)}</div>);
 }
+function MultiSelectDropdown({label,options,value,onChange}) {
+  const [open,setOpen]=useState(false);const ref=useRef(null);
+  useEffect(()=>{const h=(e)=>{if(ref.current&&!ref.current.contains(e.target))setOpen(false);};document.addEventListener('mousedown',h);return()=>document.removeEventListener('mousedown',h);},[]);
+  const toggle=(opt)=>{const arr=value||[];onChange(arr.includes(opt)?arr.filter(x=>x!==opt):[...arr,opt]);};
+  return (<div className="flex flex-col gap-1"><label className="text-sm font-medium text-gray-700">{label}</label><div className="relative" ref={ref}><button type="button" onClick={()=>setOpen(!open)} className="border border-gray-300 rounded px-3 py-2 w-full text-left text-sm bg-white min-h-[38px] flex flex-wrap gap-1">{(value||[]).length>0?(value||[]).map(v=><span key={v} className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-xs">{v}</span>):<span className="text-gray-400">-- 請選擇 --</span>}</button>{open&&(<div className="absolute top-10 left-0 right-0 bg-white border border-gray-300 rounded shadow-lg z-50 max-h-48 overflow-y-auto">{options.map(opt=>(<label key={opt} className="flex items-center gap-2 px-3 py-2 hover:bg-blue-50 text-sm cursor-pointer"><input type="checkbox" checked={(value||[]).includes(opt)} onChange={()=>toggle(opt)}/>{opt}</label>))}</div>)}</div></div>);
+}
 
-function OrdersPage({orders,setOrders,vendors,globalProducts,caseHandlers}) {
+function OrdersPage({orders,setOrders,vendors,globalProducts,caseHandlers,auth}) {
   const [filters,setFilters]=useState({vendor:'',dateFrom:'',dateTo:'',source:'',paymentMethod:'',status:''});
   const [expandedId,setExpandedId]=useState(null);const [editingId,setEditingId]=useState(null);const [editData,setEditData]=useState(null);const [creating,setCreating]=useState(false);const [quotePrintOrder,setQuotePrintOrder]=useState(null);
   const filtered=orders.filter(o=>{if(filters.vendor&&o.vendorId!==filters.vendor)return false;if(filters.dateFrom&&o.createdAt<filters.dateFrom.replace(/-/g,'/'))return false;if(filters.dateTo&&o.createdAt>filters.dateTo.replace(/-/g,'/'))return false;if(filters.source&&o.source!==filters.source)return false;if(filters.paymentMethod&&o.paymentMethod!==filters.paymentMethod)return false;if(filters.status&&o.status!==filters.status)return false;return true;});
@@ -304,14 +307,14 @@ function OrdersPage({orders,setOrders,vendors,globalProducts,caseHandlers}) {
   return (
     <div className="p-6">
       <div className="flex justify-between items-center mb-4"><h2 className="text-2xl font-bold">📋 訂單管理</h2><button onClick={()=>setCreating(!creating)} className="bg-green-500 text-white px-4 py-2 rounded text-sm">＋ 新增訂單</button></div>
-      {creating&&(<div className="bg-green-50 p-4 rounded shadow mb-6"><div className="font-bold mb-3 text-lg">新增訂單</div><OrderCreateForm vendors={vendors} globalProducts={globalProducts} caseHandlers={caseHandlers} onSave={createOrder} onCancel={()=>setCreating(false)} existingCount={orders.length}/></div>)}
+      {creating&&(<div className="bg-green-50 p-4 rounded shadow mb-6"><div className="font-bold mb-3 text-lg">新增訂單</div><OrderCreateForm vendors={vendors} globalProducts={globalProducts} caseHandlers={caseHandlers} onSave={createOrder} onCancel={()=>setCreating(false)} existingCount={orders.length} auth={auth}/></div>)}
       <div className="bg-white p-4 rounded shadow mb-6"><div className="grid grid-cols-3 gap-4 mb-3"><Select label="供應商" value={filters.vendor} onChange={v=>setFilters({...filters,vendor:v})} options={vendors.map(v=>({id:v.id,label:v.name}))}/><Input label="起日期" type="date" value={filters.dateFrom} onChange={v=>setFilters({...filters,dateFrom:v})}/><Input label="迄日期" type="date" value={filters.dateTo} onChange={v=>setFilters({...filters,dateTo:v})}/></div><div className="grid grid-cols-3 gap-4"><Select label="來源" value={filters.source} onChange={v=>setFilters({...filters,source:v})} options={sourcesSet.map(s=>({id:s,label:s}))}/><Select label="付款方式" value={filters.paymentMethod} onChange={v=>setFilters({...filters,paymentMethod:v})} options={methodsSet.map(m=>({id:m,label:m}))}/><Select label="狀態" value={filters.status} onChange={v=>setFilters({...filters,status:v})} options={ORDER_STATUSES.map(s=>({id:s.id,label:s.label}))}/></div></div>
       <div className="bg-white rounded shadow">
         {filtered.length===0&&<div className="p-8 text-center text-gray-400">無符合條件的訂單</div>}
         {filtered.map(order=>(
           <div key={order.id} className="border-b last:border-0">
             <div onClick={()=>setExpandedId(expandedId===order.id?null:order.id)} className="cursor-pointer flex justify-between items-center p-4 hover:bg-gray-50">
-              <div><div className="font-bold">{order.orderNo} — {order.customerName}</div><div className="text-sm text-gray-500">{order.createdAt} | {order.source} | {order.paymentMethod} | {order.city}{order.district}</div></div>
+              <div><div className="font-bold">{order.orderNo} — {order.customerName}</div><div className="text-sm text-gray-500">{order.createdAt} | {order.tasks[0]?.startDate||'—'} | {(()=>{const p=globalProducts.find(p=>p.id===order.tasks[0]?.productId);return p?p.name:'—';})()}{order.tasks.length>1?` 等${order.tasks.length}項`:''} | {order.city}{order.district}</div></div>
               <div className="flex items-center gap-2"><span style={{background:STATUS_MAP[order.status]?.bg||'#f3f4f6',color:STATUS_MAP[order.status]?.color||'#374151'}} className="px-3 py-1 rounded text-sm font-medium">{STATUS_MAP[order.status]?.label||order.status}</span><span className="text-gray-400 text-sm">{expandedId===order.id?'▼':'▶'}</span></div>
             </div>
             {expandedId===order.id&&(<div className="bg-gray-50 p-4 border-t">{editingId===order.id?<OrderEditForm order={editData} setEditData={setEditData} onSave={saveEdit} onCancel={()=>setEditingId(null)} vendors={vendors} globalProducts={globalProducts} caseHandlers={caseHandlers}/>:<OrderDetailView order={order} vendors={vendors} globalProducts={globalProducts} caseHandlers={caseHandlers} onEdit={()=>startEdit(order)} onQuote={()=>setQuotePrintOrder(order)} setOrders={setOrders} orders={orders}/>}</div>)}
@@ -329,12 +332,13 @@ function OrderDetailView({order,vendors,globalProducts,caseHandlers,onEdit,onQuo
   return (
     <div>
       <div className="grid grid-cols-2 gap-3 mb-4 text-sm">
-        <div><span className="font-medium">客戶：</span>{order.customerName}</div><div><span className="font-medium">電話：</span>{order.phone}</div>
-        <div><span className="font-medium">Email：</span>{order.email||'—'}</div><div><span className="font-medium">地址：</span>{order.city}{order.district}{order.address}</div>
-        {order.taxId&&<div><span className="font-medium">統編：</span>{order.taxId} {order.invoiceTitle}</div>}
+        <div><span className="font-medium">客戶：</span>{order.customerName||'—'}</div><div><span className="font-medium">電話：</span>{order.phone||'—'}</div>
+        <div><span className="font-medium">Email：</span>{order.email||'—'}</div><div><span className="font-medium">地址：</span>{order.city||''}{order.district||''}{order.address||'—'}</div>
+        <div><span className="font-medium">統編：</span>{order.taxId||'—'}</div><div><span className="font-medium">發票抬頭：</span>{order.invoiceTitle||'—'}</div>
         <div><span className="font-medium">供應商：</span>{vendors.find(v=>v.id===order.vendorId)?.name||'未派案'}</div>
         <div><span className="font-medium">施工人員：</span>{caseHandlers.find(c=>c.id===order.handlerId)?.name||'未指派'}</div>
-        <div><span className="font-medium">來源：</span>{order.source} | <span className="font-medium">付款：</span>{order.paymentMethod}</div>
+        <div><span className="font-medium">來源：</span>{order.source||'—'}</div><div><span className="font-medium">付款：</span>{order.paymentMethod||'—'}</div>
+        <div><span className="font-medium">業務：</span>{order.salesperson||'—'}</div>
       </div>
       <div className="mb-4">
         <div className="font-medium mb-2 text-sm">任務明細：（合計 NT${total.toLocaleString()}）</div>
@@ -361,14 +365,15 @@ function TaskForm({task,idx,globalProducts,onSelectProduct,onUpdateQty,onUpdateU
         <Input label="服務日期" type="date" value={(task.startDate||'').replace(/\//g,'-')} onChange={v=>onUpdateTask(task.id,'startDate',v.replace(/-/g,'/'))}/>
         <Input label="開始時間" type="time" value={task.startTime} onChange={v=>onUpdateTask(task.id,'startTime',v)}/>
         <Input label="結束日期" type="date" value={(task.endDate||'').replace(/\//g,'-')} onChange={v=>onUpdateTask(task.id,'endDate',v.replace(/-/g,'/'))}/>
+        <Input label="結束時間" type="time" value={task.endTime} onChange={v=>onUpdateTask(task.id,'endTime',v)}/>
       </div>
     </div>
   );
 }
-function OrderCreateForm({vendors,globalProducts,caseHandlers,onSave,onCancel,existingCount}) {
+function OrderCreateForm({vendors,globalProducts,caseHandlers,onSave,onCancel,existingCount,auth}) {
   const nextNum=String(existingCount+1).padStart(3,'0');
   const today=new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit'}).replace(/\//g,'/');
-  const [form,setForm]=useState({id:mkId('o'),orderNo:`ORD-2026-${nextNum}`,status:'pending',createdAt:today,source:'官網',paymentMethod:'信用卡',customerName:'',phone:'',email:'',taxId:'',invoiceTitle:'',city:'台北市',district:'',address:'',vendorId:'',handlerId:'',tasks:[{id:mkTaskId(),sameAsCustomer:true,contactName:'',contactPhone:'',contactCity:'',contactDistrict:'',contactAddress:'',productId:'',qty:1,unitPrice:0,totalPrice:0,startDate:'',startTime:'09:00',endDate:'',endTime:'18:00'}],notes:[]});
+  const [form,setForm]=useState({id:mkId('o'),orderNo:`ORD-2026-${nextNum}`,status:'incoming',createdAt:today,source:'官網',paymentMethod:'信用卡',customerName:'',phone:'',email:'',taxId:'',invoiceTitle:'',city:'台北市',district:'',address:'',vendorId:'',handlerId:'',salesperson:auth?.displayName||'',tasks:[{id:mkTaskId(),sameAsCustomer:true,contactName:'',contactPhone:'',contactCity:'',contactDistrict:'',contactAddress:'',productId:'',qty:1,unitPrice:0,totalPrice:0,startDate:'',startTime:'09:00',endDate:'',endTime:'18:00'}],notes:[]});
   const setF=(k,v)=>setForm({...form,[k]:v});
   const selectedPids=form.tasks.map(t=>t.productId).filter(Boolean);
   const vendorIdsFromProds=[...new Set(selectedPids.map(pid=>globalProducts.find(p=>p.id===pid)?.vendorId).filter(Boolean))];
@@ -389,7 +394,7 @@ function OrderCreateForm({vendors,globalProducts,caseHandlers,onSave,onCancel,ex
   const updateTask=(tid,k,v)=>setForm({...form,tasks:form.tasks.map(t=>t.id===tid?{...t,[k]:v}:t)});
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-3 gap-4"><Input label="訂單編號" value={form.orderNo} onChange={v=>setF('orderNo',v)}/><Select label="狀態" value={form.status} onChange={v=>setF('status',v)} options={ORDER_STATUSES.map(s=>({id:s.id,label:s.label}))}/><Input label="建立日期" type="date" value={form.createdAt.replace(/\//g,'-')} onChange={v=>setF('createdAt',v.replace(/-/g,'/'))} /></div>
+      <div className="grid grid-cols-4 gap-4"><div className="flex flex-col gap-1"><label className="text-sm font-medium text-gray-700">訂單編號</label><div className="bg-gray-100 border border-gray-200 rounded px-3 py-2 text-sm font-mono text-gray-600">{form.orderNo}</div></div><Select label="狀態" value={form.status} onChange={v=>setF('status',v)} options={ORDER_STATUSES.map(s=>({id:s.id,label:s.label}))}/><Input label="建立日期" type="date" value={form.createdAt.replace(/\//g,'-')} onChange={v=>setF('createdAt',v.replace(/-/g,'/'))} /><div className="flex flex-col gap-1"><label className="text-sm font-medium text-gray-700">業務</label><div className="bg-gray-100 border border-gray-200 rounded px-3 py-2 text-sm text-gray-600">{form.salesperson||'—'}</div></div></div>
       <div className="grid grid-cols-2 gap-4"><Select label="來源" value={form.source} onChange={v=>setF('source',v)} options={['官網','Line','電話','Email','FB','現場'].map(s=>({id:s,label:s}))}/><Select label="付款方式" value={form.paymentMethod} onChange={v=>setF('paymentMethod',v)} options={['信用卡','匯款','現金','Line Pay','街口支付'].map(m=>({id:m,label:m}))}/></div>
       <div className="grid grid-cols-3 gap-4"><Input label="客戶姓名" value={form.customerName} onChange={v=>setF('customerName',v)}/><Input label="電話" value={form.phone} onChange={v=>setF('phone',v)}/><Input label="Email" value={form.email} onChange={v=>setF('email',v)}/></div>
       <div className="grid grid-cols-3 gap-4"><Input label="地址" value={form.address} onChange={v=>setF('address',v)}/><Input label="統一編號" value={form.taxId} onChange={v=>setF('taxId',v)}/><Input label="發票抬頭" value={form.invoiceTitle} onChange={v=>setF('invoiceTitle',v)}/></div>
@@ -600,7 +605,7 @@ function VendorManagementPage({vendors,setVendors,globalProducts,orders}) {
       <div className="flex flex-col gap-1"><label className="text-sm font-medium text-gray-700">付款條件</label><select value={data.paymentTerms||'月結30天'} onChange={e=>setData({...data,paymentTerms:e.target.value})} className="border border-gray-300 rounded px-3 py-2 text-sm">{payTerms.map(t=><option key={t} value={t}>{t}</option>)}</select></div>
       <Input label="合約起日" type="date" value={(data.contractStart||'').replace(/\//g,'-')} onChange={v=>setData({...data,contractStart:v.replace(/-/g,'/')})}/>
       <Input label="合約迄日" type="date" value={(data.contractEnd||'').replace(/\//g,'-')} onChange={v=>setData({...data,contractEnd:v.replace(/-/g,'/')})}/>
-      <div><label className="text-sm font-medium text-gray-700 block mb-1">服務類別（逗號分隔）</label><input value={(data.categories||[]).join(',')} onChange={e=>setData({...data,categories:e.target.value.split(',').map(s=>s.trim()).filter(Boolean)})} className="border border-gray-300 rounded px-3 py-2 text-sm w-full" placeholder="整理收納,清潔除蟲"/></div>
+      <MultiSelectDropdown label="服務類別" options={PRODUCT_CATEGORIES} value={data.categories||[]} onChange={v=>setData({...data,categories:v})}/>
       <div className="col-span-3"><label className="text-sm font-medium text-gray-700 block mb-2">服務地區</label><div className="flex flex-wrap gap-x-3 gap-y-1">{REGIONS.map(r=>(<label key={r} className="flex items-center gap-1 text-xs cursor-pointer"><input type="checkbox" checked={(data.regions||[]).includes(r)} onChange={e=>{const reg=data.regions||[];setData({...data,regions:e.target.checked?[...reg,r]:reg.filter(x=>x!==r)});}}/>{r}</label>))}</div></div>
       <div className="col-span-3 flex gap-2"><button onClick={onSave} className="bg-green-500 text-white px-4 py-2 rounded text-sm">保存</button><button onClick={onCancel} className="bg-gray-500 text-white px-4 py-2 rounded text-sm">取消</button></div>
     </div>
@@ -617,7 +622,6 @@ function VendorManagementPage({vendors,setVendors,globalProducts,orders}) {
         <div className="font-bold mb-3">新增供應商</div>
         {newVendor?<VForm data={newVendor} setData={setNewVendor} onSave={addVendor} onCancel={()=>setNewVendor(null)}/>:<button onClick={()=>setNewVendor({...defVendor})} className="bg-green-500 text-white px-4 py-2 rounded text-sm">＋ 新增</button>}
       </div>
-      {editingId&&editData&&(<div className="bg-blue-50 p-4 rounded shadow mb-4"><div className="font-medium mb-3">✏️ 編輯供應商資料</div><VForm data={editData} setData={setEditData} onSave={saveEdit} onCancel={()=>setEditingId(null)}/></div>)}
       <div className="bg-white rounded shadow overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-blue-100"><tr><th className="px-4 py-3 text-left">廠商名稱</th><th className="px-4 py-3 text-left">聯絡人</th><th className="px-4 py-3 text-left whitespace-nowrap">電話</th><th className="px-4 py-3 text-left">服務類別</th><th className="px-4 py-3 text-center whitespace-nowrap">地區</th><th className="px-4 py-3 text-left">狀態</th><th className="px-4 py-3 text-left">操作</th></tr></thead>
@@ -626,15 +630,18 @@ function VendorManagementPage({vendors,setVendors,globalProducts,orders}) {
               const isActive=vendor.status!=='inactive';
               const expiryDiff=(()=>{if(!vendor.contractEnd)return null;const d=new Date(vendor.contractEnd.replace(/\//g,'-'));const diff=Math.ceil((d-new Date())/(1000*60*60*24));return diff<30&&diff>=0?diff:null;})();
               return (
-                <tr key={vendor.id} className="border-b hover:bg-gray-50">
+                <React.Fragment key={vendor.id}>
+                <tr className="border-b hover:bg-gray-50">
                   <td className="px-4 py-3"><div className="font-medium">{vendor.name}{expiryDiff!==null&&<span className="ml-1 bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded text-xs">⚠️{expiryDiff}天</span>}</div>{vendor.taxId&&<div className="text-xs text-gray-400">統編：{vendor.taxId}</div>}</td>
                   <td className="px-4 py-3">{vendor.contact}</td>
                   <td className="px-4 py-3 whitespace-nowrap">{vendor.phone}</td>
                   <td className="px-4 py-3 text-xs text-gray-600">{(vendor.categories||[]).join(', ')||'—'}</td>
                   <td className="px-4 py-3 text-center">{(vendor.regions||[]).length} 縣市</td>
                   <td className="px-4 py-3"><span className={`px-2 py-0.5 rounded text-xs font-medium ${isActive?'bg-green-100 text-green-700':'bg-gray-200 text-gray-500'}`}>{isActive?'啟用':'停用'}</span></td>
-                  <td className="px-4 py-3"><div className="flex gap-1 flex-wrap"><button onClick={()=>setDetailId(vendor.id)} className="bg-blue-500 text-white px-2 py-1 rounded text-xs">詳細</button><button onClick={()=>startEdit(vendor)} className="bg-yellow-500 text-white px-2 py-1 rounded text-xs">編輯</button><button onClick={()=>toggleStatus(vendor.id)} className={`px-2 py-1 rounded text-xs ${isActive?'bg-gray-200 text-gray-600':'bg-green-100 text-green-700'}`}>{isActive?'停用':'啟用'}</button><button onClick={()=>deleteVendor(vendor.id)} className="bg-red-500 text-white px-2 py-1 rounded text-xs">刪除</button></div></td>
+                  <td className="px-4 py-3"><div className="flex gap-1 flex-wrap"><button onClick={()=>setDetailId(vendor.id)} className="bg-blue-500 text-white px-2 py-1 rounded text-xs">詳細</button><button onClick={()=>startEdit(vendor)} className="bg-yellow-500 text-white px-2 py-1 rounded text-xs">{editingId===vendor.id?'收起':'編輯'}</button><button onClick={()=>toggleStatus(vendor.id)} className={`px-2 py-1 rounded text-xs ${isActive?'bg-gray-200 text-gray-600':'bg-green-100 text-green-700'}`}>{isActive?'停用':'啟用'}</button><button onClick={()=>deleteVendor(vendor.id)} className="bg-red-500 text-white px-2 py-1 rounded text-xs">刪除</button></div></td>
                 </tr>
+                {editingId===vendor.id&&editData&&(<tr><td colSpan={7} className="bg-blue-50 p-4"><div className="font-medium mb-3">✏️ 編輯供應商資料</div><VForm data={editData} setData={setEditData} onSave={saveEdit} onCancel={()=>setEditingId(null)}/></td></tr>)}
+                </React.Fragment>
               );
             })}
           </tbody>
