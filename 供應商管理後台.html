@@ -602,11 +602,12 @@ function VendorAccountManager({vendor}) {
   const loadAccounts=async()=>{const{data}=await supabaseClient.from('app_users').select('id,role,vendor_id,display_name,permissions,identity').eq('vendor_id',vendor.id);setAccounts(data||[]);setLoading(false);};
   useEffect(()=>{loadAccounts();},[vendor.id]);
   const createAccount=async()=>{setError('');setMsg('');if(!newAcc.email||!newAcc.password){setError('請填寫 Email 和密碼');return;}if(newAcc.password.length<6){setError('密碼至少 6 個字元');return;}
+    const{data:{session:adminSession}}=await supabaseClient.auth.getSession();
     const{data:sd,error:e}=await supabaseClient.auth.signUp({email:newAcc.email,password:newAcc.password,options:{data:{role:'vendor',display_name:newAcc.displayName}}});
-    if(e){setError('建立失敗：'+e.message);return;}
-    if(sd?.user){await new Promise(r=>setTimeout(r,2000));const{data:ex}=await supabaseClient.from('app_users').select('id').eq('id',sd.user.id).maybeSingle();
-      if(!ex){const{error:ie}=await supabaseClient.from('app_users').insert({id:sd.user.id,role:'vendor',vendor_id:vendor.id,display_name:newAcc.displayName,permissions:[],identity:''});if(ie){setError('帳號已建但角色設定失敗：'+ie.message);return;}}
-      else{await supabaseClient.from('app_users').update({vendor_id:vendor.id,display_name:newAcc.displayName}).eq('id',sd.user.id);}}
+    if(e){if(adminSession)await supabaseClient.auth.setSession({access_token:adminSession.access_token,refresh_token:adminSession.refresh_token});setError('建立失敗：'+e.message);return;}
+    if(sd?.user){const{error:rpcErr}=await supabaseClient.rpc('create_vendor_account',{user_id_param:sd.user.id,vendor_id_param:vendor.id,display_name_param:newAcc.displayName});
+      if(rpcErr){setError('帳號已建但角色設定失敗：'+rpcErr.message);}}
+    if(adminSession){await supabaseClient.auth.setSession({access_token:adminSession.access_token,refresh_token:adminSession.refresh_token});}
     setMsg('帳號建立成功！');setNewAcc({email:'',password:'',displayName:vendor.name});setCreating(false);loadAccounts();
   };
   const saveEdit=async()=>{await supabaseClient.from('app_users').update({display_name:editForm.display_name,identity:editForm.identity}).eq('id',editId);setAccounts(accounts.map(a=>a.id===editId?{...a,...editForm}:a));setEditId(null);};
@@ -786,13 +787,12 @@ function AdminManagementPage({auth}) {
   useEffect(()=>{const load=async()=>{const{data}=await supabaseClient.from('app_users').select('id,role,display_name,permissions,identity').eq('role','admin');setAdmins(data||[]);setLoading(false);};load();},[]);
   const togglePerm=(p)=>{const arr=newAdmin.permissions;setNewAdmin({...newAdmin,permissions:arr.includes(p)?arr.filter(x=>x!==p):[...arr,p]});};
   const createAdmin=async()=>{setError('');setMsg('');if(!newAdmin.email||!newAdmin.password){setError('請填寫 Email 和密碼');return;}if(newAdmin.password.length<6){setError('密碼至少 6 個字元');return;}
+    const{data:{session:adminSession}}=await supabaseClient.auth.getSession();
     const{data:signUpData,error:e}=await supabaseClient.auth.signUp({email:newAdmin.email,password:newAdmin.password,options:{data:{role:'admin',display_name:newAdmin.displayName}}});
-    if(e){setError('建立失敗：'+e.message);return;}
-    if(!signUpData?.user){setError('建立失敗：無法取得使用者資料');return;}
-    await new Promise(r=>setTimeout(r,2000));
-    const{data:existing}=await supabaseClient.from('app_users').select('id').eq('id',signUpData.user.id).maybeSingle();
-    if(!existing){const{error:insErr}=await supabaseClient.from('app_users').insert({id:signUpData.user.id,role:'admin',vendor_id:null,display_name:newAdmin.displayName,permissions:newAdmin.permissions,identity:newAdmin.identity});if(insErr){setError('帳號已建立但角色設定失敗：'+insErr.message);return;}}
-    else{await supabaseClient.from('app_users').update({permissions:newAdmin.permissions,identity:newAdmin.identity,display_name:newAdmin.displayName}).eq('id',signUpData.user.id);}
+    if(e){if(adminSession)await supabaseClient.auth.setSession({access_token:adminSession.access_token,refresh_token:adminSession.refresh_token});setError('建立失敗：'+e.message);return;}
+    if(signUpData?.user){const{error:rpcErr}=await supabaseClient.rpc('create_admin_account',{user_id_param:signUpData.user.id,display_name_param:newAdmin.displayName,permissions_param:newAdmin.permissions,identity_param:newAdmin.identity});
+      if(rpcErr){setError('帳號已建但角色設定失敗：'+rpcErr.message);}}
+    if(adminSession){await supabaseClient.auth.setSession({access_token:adminSession.access_token,refresh_token:adminSession.refresh_token});}
     setMsg('管理員建立成功！');setNewAdmin({email:'',password:'',displayName:'',identity:'',permissions:[]});setCreating(false);
     const{data}=await supabaseClient.from('app_users').select('id,role,display_name,permissions,identity').eq('role','admin');setAdmins(data||[]);
   };
