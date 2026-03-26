@@ -268,7 +268,6 @@ function App() {
           {hasPerm('products')&&<NavBtn id="products" label="📦 產品列表"/>}
         </div>
         {hasPerm('handlers')&&<NavBtn id="handlers" label="🧑‍🔧 施工人員"/>}
-        {hasPerm('users')&&<NavBtn id="users" label="👤 廠商帳號"/>}
         {hasPerm('admins')&&<NavBtn id="admins" label="🛡️ 管理員管理"/>}
         <div className="mt-auto pt-4 border-t border-brand">
           <div className="text-xs text-brand-light px-1 mb-2">{auth.displayName||'管理員'}</div>
@@ -278,10 +277,9 @@ function App() {
       <div className="flex-1 overflow-auto">
         {tab==='orders'     && <OrdersPage orders={orders} setOrders={setOrders} vendors={activeVendors} globalProducts={globalProducts} caseHandlers={caseHandlers} auth={auth}/>}
         {tab==='assignment' && <AssignmentPage orders={orders} setOrders={setOrders} vendors={activeVendors} caseHandlers={caseHandlers} globalProducts={globalProducts}/>}
-        {tab==='vendors'    && <VendorManagementPage vendors={vendors} setVendors={setVendors} globalProducts={globalProducts} orders={orders}/>}
+        {tab==='vendors'    && <VendorManagementPage vendors={vendors} setVendors={setVendors} globalProducts={globalProducts} orders={orders} vendorUsers={vendorUsers} setVendorUsers={setVendorUsers}/>}
         {tab==='products'   && <ProductsPage globalProducts={globalProducts} setGlobalProducts={setGlobalProducts} vendors={vendors}/>}
         {tab==='handlers'   && <HandlersPage caseHandlers={caseHandlers} setCaseHandlers={setCaseHandlers} vendors={vendors} schedules={schedules} setSchedules={setSchedules} globalProducts={globalProducts}/>}
-        {tab==='users'      && <UsersPage vendorUsers={vendorUsers} setVendorUsers={setVendorUsers} vendors={vendors}/>}
         {tab==='admins'     && <AdminManagementPage auth={auth}/>}
       </div>
     </div>
@@ -543,7 +541,7 @@ function VendorNotes({vendor,setVendors,vendors}) {
   return (<div className="border border-gray-100 rounded"><button onClick={()=>setOpen(!open)} className="w-full flex justify-between items-center px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">📝 往來記錄（{(vendor.notes||[]).length} 筆）<span>{open?'▲':'▼'}</span></button>{open&&(<div className="px-3 pb-3">{(vendor.notes||[]).map(n=>(<div key={n.id} className="bg-gray-50 p-2 rounded border border-gray-200 text-sm mb-2"><div>{n.text}</div><div className="text-xs text-gray-400 mt-1">{n.createdAt}</div></div>))}<div className="flex gap-2 items-end mt-2"><div className="flex-1"><textarea ref={taRef} value={noteText} onChange={e=>setNoteText(e.target.value)} placeholder="輸入往來記錄..." className="w-full border border-gray-300 rounded px-3 py-2 text-sm resize-none" rows={2}/></div><div className="flex flex-col gap-1"><EmojiPicker onSelect={insertEmoji}/><button onClick={addNote} className="bg-brand-dark text-white px-3 py-1 rounded text-sm">新增</button></div></div></div>)}</div>);
 }
 
-function VendorDetailModal({vendor,globalProducts,orders,vendors,setVendors,onClose}) {
+function VendorDetailModal({vendor,globalProducts,orders,vendors,setVendors,onClose,vendorUsers,setVendorUsers}) {
   const [openSections,setOpenSections]=useState({});
   const toggleSection=(sec)=>setOpenSections(prev=>({...prev,[sec]:!prev[sec]}));
   const isSec=(sec)=>!!openSections[sec];
@@ -591,26 +589,26 @@ function VendorDetailModal({vendor,globalProducts,orders,vendors,setVendors,onCl
             {isSec('margin')&&(<div className="px-3 pb-3">{prods.map(p=>{const calc=profitCalc(p);return(<div key={p.id} className="flex justify-between text-xs mb-1 bg-gray-50 p-2 rounded"><span>{p.name}</span><span className="flex gap-2 items-center"><span className="text-gray-400">付 NT${calc.toVendor} | 得 NT${calc.ourProfit}</span><span style={gmStyle(gm(p))} className="px-2 py-0.5 rounded">{gm(p)}%</span></span></div>);})} </div>)}
           </div>
           <VendorNotes vendor={vendor} setVendors={setVendors} vendors={vendors}/>
+          <VendorUsersSection vendor={vendor} vendorUsers={vendorUsers} setVendorUsers={setVendorUsers}/>
         </div>
       </div>
     </div>
   );
 }
+function VendorUsersSection({vendor,vendorUsers,setVendorUsers}) {
+  const [open,setOpen]=useState(false);const [newUser,setNewUser]=useState(null);
+  const users=(vendorUsers||{})[vendor.id]||[];
+  const addUser=async()=>{const nu={id:mkId('vu'),name:newUser.name,email:newUser.email,permissions:newUser.permissions||['view']};const vid=vendor.id;setVendorUsers({...vendorUsers,[vid]:[...(vendorUsers[vid]||[]),nu]});setNewUser(null);await supabaseClient.from('vendor_users').insert({id:nu.id,vendor_id:vid,name:nu.name,email:nu.email,permissions:nu.permissions});};
+  return (<div className="border border-gray-100 rounded"><button onClick={()=>setOpen(!open)} className="w-full flex justify-between items-center px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">👤 使用人員帳號（{users.length} 人）<span>{open?'▲':'▼'}</span></button>{open&&(<div className="px-3 pb-3">
+    {users.map(u=>(<div key={u.id} className="bg-gray-50 p-2 rounded border border-gray-200 text-sm mb-2"><div className="font-medium">{u.name}</div><div className="text-gray-600 text-xs">{u.email} | 權限: {(u.permissions||[]).join(', ')}</div></div>))}
+    {newUser?(<div className="grid grid-cols-2 gap-3 mt-2"><Input label="姓名" value={newUser.name} onChange={v=>setNewUser({...newUser,name:v})}/><Input label="Email" value={newUser.email} onChange={v=>setNewUser({...newUser,email:v})}/><div className="col-span-2 flex gap-2"><button onClick={addUser} className="bg-green-500 text-white px-3 py-1 rounded text-sm">保存</button><button onClick={()=>setNewUser(null)} className="bg-gray-500 text-white px-3 py-1 rounded text-sm">取消</button></div></div>):(<button onClick={()=>setNewUser({name:'',email:'',permissions:['view']})} className="mt-2 bg-green-500 text-white px-3 py-1 rounded text-sm">＋ 新增人員</button>)}
+  </div>)}</div>);
+}
 
-function VendorManagementPage({vendors,setVendors,globalProducts,orders}) {
-  const [filters,setFilters]=useState({nameSearch:'',category:'',status:''});
-  const [editingId,setEditingId]=useState(null);const [editData,setEditData]=useState(null);
-  const [newVendor,setNewVendor]=useState(null);const [detailId,setDetailId]=useState(null);
-  const categoriesSet=new Set();globalProducts.forEach(p=>categoriesSet.add(p.category));
-  const filtered=vendors.filter(v=>{if(filters.nameSearch&&!v.name.includes(filters.nameSearch))return false;if(filters.category&&!(v.categories||[]).includes(filters.category))return false;if(filters.status&&v.status!==filters.status)return false;return true;});
-  const toggleStatus=async(vid)=>{const ns=vendors.find(v=>v.id===vid)?.status==='inactive'?'active':'inactive';setVendors(vendors.map(v=>v.id===vid?{...v,status:ns}:v));await supabaseClient.from('vendors').update({status:ns}).eq('id',vid);};
-  const deleteVendor=async(vid)=>{if(!window.confirm('確定刪除此供應商？'))return;setVendors(vendors.filter(v=>v.id!==vid));await supabaseClient.from('vendors').delete().eq('id',vid);};
-  const startEdit=(vendor)=>{setEditingId(vendor.id);setEditData({...vendor,categories:[...(vendor.categories||[])],regions:[...(vendor.regions||[])]});};
-  const saveEdit=async()=>{if(editData){setVendors(vendors.map(v=>v.id===editingId?editData:v));setEditingId(null);setEditData(null);await supabaseClient.from('vendors').update(vendorToDb(editData)).eq('id',editingId);}};
-  const addVendor=async()=>{const nv={...newVendor,id:mkId('v'),status:'active',notes:[]};setVendors([...vendors,nv]);setNewVendor(null);await supabaseClient.from('vendors').insert(vendorToDb(nv));};
-  const defVendor={name:'',contact:'',phone:'',email:'',taxId:'',address:'',bankName:'',bankAccount:'',paymentTerms:'月結30天',contractStart:'',contractEnd:'',categories:[],regions:[]};
-  const payTerms=['月結30天','月結60天','月結90天','即期付款','預付'];
-  const VForm=({data,setData,onSave,onCancel})=>(
+const PAY_TERMS=['月結30天','月結60天','月結90天','即期付款','預付'];
+const DEF_VENDOR={name:'',contact:'',phone:'',email:'',taxId:'',address:'',bankName:'',bankAccount:'',paymentTerms:'月結30天',contractStart:'',contractEnd:'',categories:[],regions:[]};
+function VForm({data,setData,onSave,onCancel}) {
+  return (
     <div className="grid grid-cols-3 gap-3">
       <Input label="公司名稱" value={data.name} onChange={v=>setData({...data,name:v})}/>
       <Input label="聯絡人" value={data.contact} onChange={v=>setData({...data,contact:v})}/>
@@ -620,7 +618,7 @@ function VendorManagementPage({vendors,setVendors,globalProducts,orders}) {
       <Input label="公司地址" value={data.address||''} onChange={v=>setData({...data,address:v})}/>
       <Input label="銀行名稱" value={data.bankName||''} onChange={v=>setData({...data,bankName:v})}/>
       <Input label="銀行帳號" value={data.bankAccount||''} onChange={v=>setData({...data,bankAccount:v})}/>
-      <div className="flex flex-col gap-1"><label className="text-sm font-medium text-gray-700">付款條件</label><select value={data.paymentTerms||'月結30天'} onChange={e=>setData({...data,paymentTerms:e.target.value})} className="border border-gray-300 rounded px-3 py-2 text-sm">{payTerms.map(t=><option key={t} value={t}>{t}</option>)}</select></div>
+      <div className="flex flex-col gap-1"><label className="text-sm font-medium text-gray-700">付款條件</label><select value={data.paymentTerms||'月結30天'} onChange={e=>setData({...data,paymentTerms:e.target.value})} className="border border-gray-300 rounded px-3 py-2 text-sm">{PAY_TERMS.map(t=><option key={t} value={t}>{t}</option>)}</select></div>
       <Input label="合約起日" type="date" value={(data.contractStart||'').replace(/\//g,'-')} onChange={v=>setData({...data,contractStart:v.replace(/-/g,'/')})}/>
       <Input label="合約迄日" type="date" value={(data.contractEnd||'').replace(/\//g,'-')} onChange={v=>setData({...data,contractEnd:v.replace(/-/g,'/')})}/>
       <MultiSelectDropdown label="服務類別" options={PRODUCT_CATEGORIES} value={data.categories||[]} onChange={v=>setData({...data,categories:v})}/>
@@ -628,6 +626,19 @@ function VendorManagementPage({vendors,setVendors,globalProducts,orders}) {
       <div className="col-span-3 flex gap-2"><button onClick={onSave} className="bg-green-500 text-white px-4 py-2 rounded text-sm">保存</button><button onClick={onCancel} className="bg-gray-500 text-white px-4 py-2 rounded text-sm">取消</button></div>
     </div>
   );
+}
+
+function VendorManagementPage({vendors,setVendors,globalProducts,orders,vendorUsers,setVendorUsers}) {
+  const [filters,setFilters]=useState({nameSearch:'',category:'',status:''});
+  const [editingId,setEditingId]=useState(null);const [editData,setEditData]=useState(null);
+  const [newVendor,setNewVendor]=useState(null);const [detailId,setDetailId]=useState(null);
+  const categoriesSet=new Set();globalProducts.forEach(p=>categoriesSet.add(p.category));
+  const filtered=vendors.filter(v=>{if(filters.nameSearch&&!v.name.includes(filters.nameSearch))return false;if(filters.category&&!(v.categories||[]).includes(filters.category))return false;if(filters.status&&v.status!==filters.status)return false;return true;});
+  const toggleStatus=async(vid)=>{const ns=vendors.find(v=>v.id===vid)?.status==='inactive'?'active':'inactive';setVendors(vendors.map(v=>v.id===vid?{...v,status:ns}:v));await supabaseClient.from('vendors').update({status:ns}).eq('id',vid);};
+  const deleteVendor=async(vid)=>{if(!window.confirm('確定刪除此供應商？'))return;setVendors(vendors.filter(v=>v.id!==vid));await supabaseClient.from('vendors').delete().eq('id',vid);};
+  const startEdit=(vendor)=>{setEditingId(editingId===vendor.id?null:vendor.id);setEditData({...vendor,categories:[...(vendor.categories||[])],regions:[...(vendor.regions||[])]});};
+  const saveEdit=async()=>{if(editData){setVendors(vendors.map(v=>v.id===editingId?editData:v));setEditingId(null);setEditData(null);await supabaseClient.from('vendors').update(vendorToDb(editData)).eq('id',editingId);}};
+  const addVendor=async()=>{const nv={...newVendor,id:mkId('v'),status:'active',notes:[]};setVendors([...vendors,nv]);setNewVendor(null);await supabaseClient.from('vendors').insert(vendorToDb(nv));};
   return (
     <div className="p-6">
       <div className="flex justify-between items-center mb-4"><h2 className="text-2xl font-bold">🏢 供應商</h2><ImportExportToolbar data={vendors} columns={VENDOR_CSV_COLS} filename="供應商匯出.csv" entityName="供應商" tableName="vendors" uniqueFields={['tax_id','phone']} transformRow={(r)=>({id:mkId('v'),name:r['公司名稱']||'',contact:r['聯絡人']||'',phone:r['電話']||'',email:r['Email']||'',tax_id:r['統一編號']||'',address:r['地址']||'',bank_name:r['銀行名稱']||'',bank_account:r['銀行帳號']||'',payment_terms:r['付款條件']||'月結30天',status:'active',categories:'{}',regions:'{}'})} onImportDone={()=>window.location.reload()}/></div>
@@ -638,7 +649,7 @@ function VendorManagementPage({vendors,setVendors,globalProducts,orders}) {
       </div>
       <div className="bg-green-50 p-4 rounded shadow mb-4">
         <div className="font-bold mb-3">新增供應商</div>
-        {newVendor?<VForm data={newVendor} setData={setNewVendor} onSave={addVendor} onCancel={()=>setNewVendor(null)}/>:<button onClick={()=>setNewVendor({...defVendor})} className="bg-green-500 text-white px-4 py-2 rounded text-sm">＋ 新增</button>}
+        {newVendor?<VForm data={newVendor} setData={setNewVendor} onSave={addVendor} onCancel={()=>setNewVendor(null)}/>:<button onClick={()=>setNewVendor({...DEF_VENDOR})} className="bg-green-500 text-white px-4 py-2 rounded text-sm">＋ 新增</button>}
       </div>
       <div className="bg-white rounded shadow overflow-x-auto">
         <table className="w-full text-sm">
@@ -665,7 +676,7 @@ function VendorManagementPage({vendors,setVendors,globalProducts,orders}) {
           </tbody>
         </table>
       </div>
-      {detailId&&<VendorDetailModal vendor={vendors.find(v=>v.id===detailId)} globalProducts={globalProducts} orders={orders} vendors={vendors} setVendors={setVendors} onClose={()=>setDetailId(null)}/>}
+      {detailId&&<VendorDetailModal vendor={vendors.find(v=>v.id===detailId)} globalProducts={globalProducts} orders={orders} vendors={vendors} setVendors={setVendors} onClose={()=>setDetailId(null)} vendorUsers={vendorUsers} setVendorUsers={setVendorUsers}/>}
     </div>
   );
 }
@@ -742,9 +753,13 @@ function AdminManagementPage({auth}) {
   useEffect(()=>{const load=async()=>{const{data}=await supabaseClient.from('app_users').select('id,role,display_name,permissions,identity').eq('role','admin');setAdmins(data||[]);setLoading(false);};load();},[]);
   const togglePerm=(p)=>{const arr=newAdmin.permissions;setNewAdmin({...newAdmin,permissions:arr.includes(p)?arr.filter(x=>x!==p):[...arr,p]});};
   const createAdmin=async()=>{setError('');setMsg('');if(!newAdmin.email||!newAdmin.password){setError('請填寫 Email 和密碼');return;}if(newAdmin.password.length<6){setError('密碼至少 6 個字元');return;}
-    const{data:signUpData,error:e}=await supabaseClient.auth.signUp({email:newAdmin.email,password:newAdmin.password,options:{data:{role:'admin',display_name:newAdmin.displayName,permissions:newAdmin.permissions,identity:newAdmin.identity}}});
+    const{data:signUpData,error:e}=await supabaseClient.auth.signUp({email:newAdmin.email,password:newAdmin.password,options:{data:{role:'admin',display_name:newAdmin.displayName}}});
     if(e){setError('建立失敗：'+e.message);return;}
-    if(signUpData?.user){await new Promise(r=>setTimeout(r,1000));const{data:existing}=await supabaseClient.from('app_users').select('id').eq('id',signUpData.user.id).single();if(!existing){await supabaseClient.from('app_users').insert({id:signUpData.user.id,role:'admin',display_name:newAdmin.displayName,permissions:newAdmin.permissions,identity:newAdmin.identity});}}
+    if(!signUpData?.user){setError('建立失敗：無法取得使用者資料');return;}
+    await new Promise(r=>setTimeout(r,2000));
+    const{data:existing}=await supabaseClient.from('app_users').select('id').eq('id',signUpData.user.id).maybeSingle();
+    if(!existing){const{error:insErr}=await supabaseClient.from('app_users').insert({id:signUpData.user.id,role:'admin',vendor_id:null,display_name:newAdmin.displayName,permissions:newAdmin.permissions,identity:newAdmin.identity});if(insErr){setError('帳號已建立但角色設定失敗：'+insErr.message);return;}}
+    else{await supabaseClient.from('app_users').update({permissions:newAdmin.permissions,identity:newAdmin.identity,display_name:newAdmin.displayName}).eq('id',signUpData.user.id);}
     setMsg('管理員建立成功！');setNewAdmin({email:'',password:'',displayName:'',identity:'',permissions:[]});setCreating(false);
     const{data}=await supabaseClient.from('app_users').select('id,role,display_name,permissions,identity').eq('role','admin');setAdmins(data||[]);
   };
