@@ -247,11 +247,11 @@ function App() {
   const [orders,setOrders]=useState([]);
   useEffect(()=>{supabaseClient.auth.getSession().then(async({data:{session}})=>{if(session){const{data:profile}=await supabaseClient.from('app_users').select('role,vendor_id,display_name,permissions,identity').eq('id',session.user.id).single();if(profile)setAuth({role:profile.role,vendorId:profile.vendor_id,displayName:profile.display_name||'',permissions:profile.permissions||[],identity:profile.identity||''});}setAppLoading(false);});},[]);
   useEffect(()=>{if(!auth)return;const load=async()=>{const[vR,vnR,pR,hR,sR,oR,tR,nR,vuR]=await Promise.all([supabaseClient.from('vendors').select('*'),supabaseClient.from('vendor_notes').select('*'),supabaseClient.from('global_products').select('*'),supabaseClient.from('case_handlers').select('*'),supabaseClient.from('schedules').select('*'),supabaseClient.from('orders').select('*'),supabaseClient.from('order_tasks').select('*'),supabaseClient.from('order_notes').select('*'),supabaseClient.from('vendor_users').select('*')]);setVendors((vR.data||[]).map(v=>transformVendor(v,vnR.data||[])));setGlobalProducts((pR.data||[]).map(transformProduct));setCaseHandlers((hR.data||[]).map(transformHandler));setSchedules(transformSchedules(sR.data));setOrders((oR.data||[]).map(o=>transformOrder(o,tR.data||[],nR.data||[])));setVendorUsers(transformVendorUsers(vuR.data));};load();},[auth]);
+  const [navParams,setNavParams]=useState({});
+  const navigateTo=(newTab,params={})=>{setTab(newTab);setNavParams(params);};
   const handleLogout=async()=>{await supabaseClient.auth.signOut();setAuth(null);};
   if(appLoading) return <div className="min-h-screen bg-gradient-to-br from-brand-dark to-brand-active flex items-center justify-center"><div className="text-white text-xl">載入中...</div></div>;
   if(!auth) return <LoginPage onLogin={setAuth}/>;
-  const [navParams,setNavParams]=useState({});
-  const navigateTo=(newTab,params={})=>{setTab(newTab);setNavParams(params);};
   const activeVendors=vendors.filter(v=>v.status!=='inactive');
   if(auth.role!=='admin'){
     return <VendorPortal auth={auth} vendor={vendors.find(v=>v.id===auth.vendorId)} orders={orders.filter(o=>o.vendorId===auth.vendorId)} setOrders={setOrders} allOrders={orders} caseHandlers={caseHandlers.filter(ch=>ch.vendorId===auth.vendorId)} setCaseHandlers={setCaseHandlers} allCaseHandlers={caseHandlers} schedules={schedules} setSchedules={setSchedules} globalProducts={globalProducts} vendors={vendors} setVendors={setVendors} vendorUsers={vendorUsers} setVendorUsers={setVendorUsers} onLogout={handleLogout}/>;
