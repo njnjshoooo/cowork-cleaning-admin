@@ -238,7 +238,7 @@ function LoginPage({onLogin}) {
 }
 
 function App() {
-  const [auth,setAuth]=useState(null);const [tab,setTab]=useState(()=>localStorage.getItem('homood_tab')||'dashboard');const [appLoading,setAppLoading]=useState(true);
+  const [auth,setAuth]=useState(null);const [tab,setTab]=useState(()=>{const s=localStorage.getItem('homood_tab');return['dashboard','orders','assignment','vendors','products','admins'].includes(s)?s:'dashboard';});const [appLoading,setAppLoading]=useState(true);
   const [globalProducts,setGlobalProducts]=useState([]);
   const [vendors,setVendors]=useState([]);
   const [caseHandlers,setCaseHandlers]=useState([]);
