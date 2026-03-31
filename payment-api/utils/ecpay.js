@@ -6,7 +6,7 @@ const ECPAY_CONFIG = {
   HashKey: process.env.ECPAY_HASH_KEY || 'pwFHCqoQZGmho4w6',
   HashIV: process.env.ECPAY_HASH_IV || 'EkRm7iFT261dpevs',
   PaymentURL: process.env.ECPAY_PAYMENT_URL || 'https://payment-stage.ecpay.com.tw/Cashier/AioCheckOut/V5',
-  ReturnURL: process.env.PAYMENT_CALLBACK_URL || 'https://api.homood-clean.tw/api/payment-callback',
+  ReturnURL: process.env.PAYMENT_CALLBACK_URL || 'https://homood-payment-api.zeabur.app/api/payment-callback',
   ClientBackURL: process.env.CLIENT_URL || 'https://homood-clean.tw',
 };
 
