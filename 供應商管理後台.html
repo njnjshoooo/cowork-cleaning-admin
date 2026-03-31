@@ -280,10 +280,10 @@ function App() {
       </nav>
       <div className="flex-1 overflow-auto">
         {tab==='dashboard'  && <DashboardPage orders={orders} vendors={vendors} globalProducts={globalProducts} caseHandlers={caseHandlers}/>}
-        {tab==='orders'     && <OrdersPage orders={orders} setOrders={setOrders} vendors={activeVendors} globalProducts={globalProducts} caseHandlers={caseHandlers} auth={auth} onNavigate={navigateTo} navParams={navParams}/>}
+        {tab==='orders'     && <OrdersPage orders={orders} setOrders={setOrders} vendors={activeVendors} globalProducts={globalProducts} caseHandlers={caseHandlers} auth={auth} onNavigate={navigateTo} navParams={navParams} reloadData={reloadData}/>}
         {tab==='assignment' && <AssignmentPage orders={orders} setOrders={setOrders} vendors={activeVendors} caseHandlers={caseHandlers} globalProducts={globalProducts} onNavigate={navigateTo} navParams={navParams}/>}
-        {tab==='vendors'    && <VendorManagementPage vendors={vendors} setVendors={setVendors} globalProducts={globalProducts} orders={orders} vendorUsers={vendorUsers} setVendorUsers={setVendorUsers}/>}
-        {tab==='products'   && <ProductsPage globalProducts={globalProducts} setGlobalProducts={setGlobalProducts} vendors={vendors}/>}
+        {tab==='vendors'    && <VendorManagementPage vendors={vendors} setVendors={setVendors} globalProducts={globalProducts} orders={orders} vendorUsers={vendorUsers} setVendorUsers={setVendorUsers} reloadData={reloadData}/>}
+        {tab==='products'   && <ProductsPage globalProducts={globalProducts} setGlobalProducts={setGlobalProducts} vendors={vendors} reloadData={reloadData}/>}
         {tab==='admins'     && <AdminManagementPage auth={auth}/>}
       </div>
     </div>
@@ -346,7 +346,7 @@ function DashboardPage({orders,vendors,globalProducts,caseHandlers}) {
   </div>);
 }
 
-function OrdersPage({orders,setOrders,vendors,globalProducts,caseHandlers,auth,onNavigate,navParams}) {
+function OrdersPage({orders,setOrders,vendors,globalProducts,caseHandlers,auth,onNavigate,navParams,reloadData}) {
   const [filters,setFilters]=useState({vendor:'',dateFrom:'',dateTo:'',source:'',paymentMethod:'',status:''});
   const [expandedId,setExpandedId]=useState(null);const [editingId,setEditingId]=useState(null);const [editData,setEditData]=useState(null);const [creating,setCreating]=useState(false);const [quotePrintOrder,setQuotePrintOrder]=useState(null);
   const filtered=orders.filter(o=>{if(filters.vendor&&o.vendorId!==filters.vendor)return false;if(filters.dateFrom&&o.createdAt<filters.dateFrom.replace(/-/g,'/'))return false;if(filters.dateTo&&o.createdAt>filters.dateTo.replace(/-/g,'/'))return false;if(filters.source&&o.source!==filters.source)return false;if(filters.paymentMethod&&o.paymentMethod!==filters.paymentMethod)return false;if(filters.status&&o.status!==filters.status)return false;return true;});
@@ -717,7 +717,7 @@ function VForm({data,setData,onSave,onCancel}) {
   );
 }
 
-function VendorManagementPage({vendors,setVendors,globalProducts,orders,vendorUsers,setVendorUsers}) {
+function VendorManagementPage({vendors,setVendors,globalProducts,orders,vendorUsers,setVendorUsers,reloadData}) {
   const [filters,setFilters]=useState({nameSearch:'',category:'',status:''});
   const [editingId,setEditingId]=useState(null);const [editData,setEditData]=useState(null);
   const [newVendor,setNewVendor]=useState(null);const [detailId,setDetailId]=useState(null);
@@ -773,7 +773,7 @@ function VendorManagementPage({vendors,setVendors,globalProducts,orders,vendorUs
   );
 }
 
-function ProductsPage({globalProducts,setGlobalProducts,vendors}) {
+function ProductsPage({globalProducts,setGlobalProducts,vendors,reloadData}) {
   const [filters,setFilters]=useState({category:'',vendor:'',marginMin:'',marginMax:''});
   const [editingId,setEditingId]=useState(null);const [editData,setEditData]=useState(null);const [newProduct,setNewProduct]=useState(null);
   const allCats=[...new Set([...PRODUCT_CATEGORIES,...globalProducts.map(p=>p.category)])];
