@@ -18,6 +18,7 @@ tailwind.config = {
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
 <style>
 * { box-sizing: border-box; }
 body { margin: 0; font-family: 'Microsoft JhengHei', 'Segoe UI', sans-serif; }
@@ -51,6 +52,7 @@ const STATUS_MAP = Object.fromEntries(ORDER_STATUSES.map(s=>[s.id,s]));
 const REGIONS = ['台北市','新北市','桃園市','台中市','台南市','高雄市','基隆市','新竹市','嘉義市','新竹縣','苗栗縣','彰化縣','南投縣','雲林縣','嘉義縣','屏東縣','宜蘭縣','花蓮縣','台東縣'];
 const EMOJIS = ['😊','😂','🥰','😎','🤔','👍','👏','🎉','🎊','✅','❌','⚠️','📝','📋','📌','🔔','💡','🔧','🏠','🧹','🧺','🛠️','💰','💳','📅','⏰','🚗','📞','✉️','🔑','⭐','❤️','🌟','💯','🙏','👋','🤝','💪','🎯','📊','📈','🗓️','📁','🗂️','💼','🧑‍🔧','👩‍💼','👨‍💼','🏢'];
 const DEFAULT_CATEGORIES = ['整理收納','清潔除蟲','搬家清運','局部修繕','其他'];
+const PAYMENT_API_URL = 'https://homood-payment-api.zeabur.app';
 const ADMIN_MODULES = [{id:'orders',label:'訂單管理'},{id:'assignment',label:'任務管理'},{id:'vendors',label:'合作夥伴'},{id:'products',label:'產品列表'},{id:'users',label:'合作夥伴帳號'},{id:'admins',label:'後台帳號管理'}];
 
 const gm = (p) => {
@@ -511,14 +513,25 @@ function OrderEditForm({order,setEditData,onSave,onCancel,vendors,globalProducts
 function QuotePrintView({order,globalProducts,vendors,onBack}) {
   const vendor=vendors.find(v=>v.id===order.vendorId);
   const total=order.tasks.reduce((s,t)=>s+(t.totalPrice||0),0);
+  const [paymentLoading,setPaymentLoading]=useState(false);const [paymentUrl,setPaymentUrl]=useState('');const [paymentParams,setPaymentParams]=useState(null);const [qrDataUrl,setQrDataUrl]=useState('');const [paymentError,setPaymentError]=useState('');
+  const createPayment=async()=>{setPaymentLoading(true);setPaymentError('');
+    try{const resp=await fetch(`${PAYMENT_API_URL}/api/create-payment`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({orderId:order.id,orderNo:order.orderNo,amount:total,itemName:order.tasks.map(t=>{const p=globalProducts.find(x=>x.id===t.productId);return p?.name||'服務';}).join('#'),customerName:order.customerName,customerEmail:order.email,customerPhone:order.phone})});
+      const data=await resp.json();if(!data.success){setPaymentError(data.error||'建立付款失敗');return;}
+      setPaymentUrl(data.paymentUrl);setPaymentParams(data.params);
+      if(window.QRCode){const url=`${PAYMENT_API_URL}/pay/${data.merchantTradeNo}`;const qr=await window.QRCode.toDataURL(url,{width:200,margin:1});setQrDataUrl(qr);}
+    }catch(e){setPaymentError('連線失敗：'+e.message);}finally{setPaymentLoading(false);}
+  };
+  const submitPayment=()=>{if(!paymentParams)return;const form=document.createElement('form');form.method='POST';form.action=paymentUrl;form.target='_blank';Object.entries(paymentParams).forEach(([k,v])=>{const input=document.createElement('input');input.type='hidden';input.name=k;input.value=v;form.appendChild(input);});document.body.appendChild(form);form.submit();document.body.removeChild(form);};
   return (
     <div className="p-6 max-w-3xl mx-auto">
-      <div className="no-print flex gap-2 mb-4"><button onClick={onBack} className="bg-gray-500 text-white px-4 py-2 rounded text-sm">← 返回</button><button onClick={()=>window.print()} className="bg-brand-dark text-white px-4 py-2 rounded text-sm">🖨️ 列印 / 匯出 PDF</button></div>
+      <div className="no-print flex gap-2 mb-4"><button onClick={onBack} className="bg-gray-500 text-white px-4 py-2 rounded text-sm">← 返回</button><button onClick={()=>window.print()} className="bg-brand-dark text-white px-4 py-2 rounded text-sm">🖨️ 列印 / 匯出 PDF</button>{!paymentParams&&<button onClick={createPayment} disabled={paymentLoading||total<=0} className="bg-green-600 text-white px-4 py-2 rounded text-sm disabled:opacity-50">{paymentLoading?'產生中...':'💳 產生付款連結'}</button>}</div>
       <div className="bg-white border border-gray-200 p-8 rounded shadow">
         <div className="flex justify-between items-start mb-8"><div><h1 className="text-3xl font-bold text-brand-dark">報 價 單</h1><div className="text-gray-400 text-sm mt-1">Quotation</div></div><div className="text-right text-sm text-gray-600"><div className="font-bold text-gray-800 text-base">{vendor?.name||'合作夥伴'}</div><div>{vendor?.contact}</div><div>{vendor?.phone}</div><div>{vendor?.email}</div></div></div>
         <div className="grid grid-cols-2 gap-8 mb-6 text-sm"><div><div className="font-bold text-gray-700 border-b border-gray-200 pb-1 mb-2">客戶資訊</div><div>姓名：{order.customerName}</div><div>電話：{order.phone}</div>{order.email&&<div>Email：{order.email}</div>}<div>地址：{order.city}{order.district}{order.address}</div>{order.taxId&&<div>統編：{order.taxId} {order.invoiceTitle}</div>}</div><div><div className="font-bold text-gray-700 border-b border-gray-200 pb-1 mb-2">報價資訊</div><div>訂單編號：{order.orderNo}</div><div>報價日期：{order.createdAt}</div><div>付款方式：{order.paymentMethod}</div></div></div>
         <table className="w-full mb-6 text-sm border-collapse"><thead><tr className="bg-brand-dark text-white"><th className="px-3 py-2 text-left">#</th><th className="px-3 py-2 text-left">服務項目</th><th className="px-3 py-2 text-left">類別</th><th className="px-3 py-2 text-center">數量</th><th className="px-3 py-2 text-right">單價</th><th className="px-3 py-2 text-left">服務日期</th><th className="px-3 py-2 text-right">小計</th></tr></thead><tbody>{order.tasks.map((t,i)=>{const prod=globalProducts.find(p=>p.id===t.productId);const qty=t.qty||1;const up=t.unitPrice||t.totalPrice||0;return(<tr key={t.id} className={i%2===0?'bg-gray-50':''}><td className="px-3 py-2 border-b border-gray-100">{i+1}</td><td className="px-3 py-2 border-b border-gray-100">{prod?.name||'—'}</td><td className="px-3 py-2 border-b border-gray-100">{prod?.category||'—'}</td><td className="px-3 py-2 border-b border-gray-100 text-center">{qty}</td><td className="px-3 py-2 border-b border-gray-100 text-right">NT$ {up.toLocaleString()}</td><td className="px-3 py-2 border-b border-gray-100">{t.startDate} {t.startTime}</td><td className="px-3 py-2 border-b border-gray-100 text-right">NT$ {(t.totalPrice||0).toLocaleString()}</td></tr>);})}</tbody><tfoot><tr className="bg-brand-light font-bold"><td colSpan={6} className="px-3 py-3 text-right text-brand-dark">合計金額</td><td className="px-3 py-3 text-right text-brand-dark text-lg">NT$ {total.toLocaleString()}</td></tr></tfoot></table>
-        <div className="text-xs text-gray-400 border-t pt-4">* 本報價單有效期間 30 天。如有疑問，請聯繫合作夥伴。</div>
+        {paymentParams&&(<div className="border-t border-gray-200 pt-6 mt-6"><div className="flex items-center gap-6"><div className="flex-1"><h3 className="font-bold text-lg mb-2">💳 線上付款</h3><p className="text-sm text-gray-600 mb-3">支援信用卡 / ATM 轉帳 / 超商代碼繳費</p><button onClick={submitPayment} className="bg-green-600 text-white px-6 py-3 rounded-lg font-bold text-lg hover:bg-green-700">前往付款 NT$ {total.toLocaleString()}</button></div>{qrDataUrl&&<div className="text-center"><img src={qrDataUrl} className="w-40 h-40 mx-auto"/><div className="text-xs text-gray-400 mt-1">掃碼付款</div></div>}</div></div>)}
+        {paymentError&&<div className="text-red-500 text-sm mt-4 bg-red-50 p-3 rounded">{paymentError}</div>}
+        <div className="text-xs text-gray-400 border-t pt-4 mt-4">* 本報價單有效期間 30 天。如有疑問，請聯繫合作夥伴。</div>
       </div>
     </div>
   );
