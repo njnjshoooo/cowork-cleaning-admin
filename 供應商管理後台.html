@@ -519,7 +519,6 @@ function OrderEditForm({order,setEditData,onSave,onCancel,vendors,globalProducts
         <button type="button" onClick={addTask} className="text-brand-dark text-sm border border-brand px-3 py-1 rounded hover:bg-brand-light">+ 新增任務</button>
       </div>
       <div className="grid grid-cols-1 gap-4"><Select label="狀態" value={order.status} onChange={v=>setEditData({...order,status:v})} options={getAllowedStatuses(order.status).map(s=>({id:s.id,label:s.label}))}/></div>
-      </div>
       <div className="flex gap-2"><button onClick={onSave} className="bg-green-500 text-white px-4 py-2 rounded text-sm">保存</button><button onClick={onCancel} className="bg-gray-500 text-white px-4 py-2 rounded text-sm">取消</button></div>
     </div>
   );
