@@ -365,11 +365,12 @@ function DashboardPage({orders,vendors,globalProducts,caseHandlers}) {
 function OrdersPage({orders,setOrders,vendors,globalProducts,caseHandlers,auth,onNavigate,navParams,reloadData}) {
   const [filters,setFilters]=useState({vendor:'',dateFrom:'',dateTo:'',source:'',paymentMethod:'',status:''});
   const [expandedId,setExpandedId]=useState(null);const [editingId,setEditingId]=useState(null);const [editData,setEditData]=useState(null);const [creating,setCreating]=useState(false);const [quotePrintOrder,setQuotePrintOrder]=useState(null);
-  const filtered=orders.filter(o=>{if(filters.vendor&&o.vendorId!==filters.vendor)return false;if(filters.dateFrom&&o.createdAt<filters.dateFrom.replace(/-/g,'/'))return false;if(filters.dateTo&&o.createdAt>filters.dateTo.replace(/-/g,'/'))return false;if(filters.source&&o.source!==filters.source)return false;if(filters.paymentMethod&&o.paymentMethod!==filters.paymentMethod)return false;if(filters.status&&o.status!==filters.status)return false;return true;});
+  const filtered=orders.filter(o=>{if(filters.vendor){const tvids=o.tasks.map(t=>t.vendorId).filter(Boolean);if(!tvids.includes(filters.vendor))return false;}if(filters.dateFrom&&o.createdAt<filters.dateFrom.replace(/-/g,'/'))return false;if(filters.dateTo&&o.createdAt>filters.dateTo.replace(/-/g,'/'))return false;if(filters.source&&o.source!==filters.source)return false;if(filters.status&&o.status!==filters.status)return false;return true;}).sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'')||(b.orderNo||'').localeCompare(a.orderNo||''));
   const sourcesSet=[...new Set(orders.map(o=>o.source))];const methodsSet=[...new Set(orders.map(o=>o.paymentMethod))];
   const startEdit=(order)=>{setEditingId(order.id);setEditData(JSON.parse(JSON.stringify(order)));};
   const saveEdit=async()=>{if(editData){setOrders(orders.map(o=>o.id===editingId?editData:o));setEditingId(null);setEditData(null);await supabaseClient.from('orders').update(orderToDb(editData)).eq('id',editingId);await supabaseClient.from('order_tasks').delete().eq('order_id',editingId);for(const t of editData.tasks)await supabaseClient.from('order_tasks').insert(taskToDb(t,editingId));}};
-  const createOrder=async(newOrder)=>{setOrders([...orders,newOrder]);setCreating(false);await supabaseClient.from('orders').insert(orderToDb(newOrder));for(const t of newOrder.tasks)await supabaseClient.from('order_tasks').insert(taskToDb(t,newOrder.id));};
+  const getNextOrderNo=()=>{const existing=orders.map(o=>o.orderNo||'').filter(n=>n.startsWith('ORD-'));const maxNum=existing.reduce((m,n)=>{const parts=n.split('-');const num=parseInt(parts[parts.length-1])||0;return num>m?num:m;},0);return `ORD-${new Date().getFullYear()}-${String(maxNum+1).padStart(3,'0')}`;};
+  const createOrder=async(newOrder)=>{if(!newOrder.orderNo)newOrder.orderNo=getNextOrderNo();setOrders([...orders,newOrder]);setCreating(false);await supabaseClient.from('orders').insert(orderToDb(newOrder));for(const t of newOrder.tasks)await supabaseClient.from('order_tasks').insert(taskToDb(t,newOrder.id));};
   if(quotePrintOrder) return <QuotePrintView order={quotePrintOrder} globalProducts={globalProducts} vendors={vendors} onBack={()=>setQuotePrintOrder(null)}/>;
   return (
     <div className="p-6">
@@ -378,7 +379,7 @@ function OrdersPage({orders,setOrders,vendors,globalProducts,caseHandlers,auth,o
       <div className="bg-white p-4 rounded shadow mb-6"><div className="grid grid-cols-3 gap-4 mb-3"><Select label="合作夥伴" value={filters.vendor} onChange={v=>setFilters({...filters,vendor:v})} options={vendors.map(v=>({id:v.id,label:v.name}))}/><Input label="起日期" type="date" value={filters.dateFrom} onChange={v=>setFilters({...filters,dateFrom:v})}/><Input label="迄日期" type="date" value={filters.dateTo} onChange={v=>setFilters({...filters,dateTo:v})}/></div><div className="grid grid-cols-2 gap-4"><Select label="來源" value={filters.source} onChange={v=>setFilters({...filters,source:v})} options={sourcesSet.map(s=>({id:s,label:s}))}/><Select label="狀態" value={filters.status} onChange={v=>setFilters({...filters,status:v})} options={ORDER_STATUSES.map(s=>({id:s.id,label:s.label}))}/></div></div>
       <div className="bg-white rounded shadow overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="bg-brand-light"><tr><th className="px-3 py-3 text-left">訂單編號</th><th className="px-3 py-3 text-left">客戶</th><th className="px-3 py-3 text-left">業務</th><th className="px-3 py-3 text-left">合作夥伴</th><th className="px-3 py-3 text-left">商品</th><th className="px-3 py-3 text-left">服務日期</th><th className="px-3 py-3 text-left">狀態</th><th className="px-3 py-3 text-center">展開</th></tr></thead>
+          <thead className="bg-brand-light"><tr><th className="px-3 py-3 text-left">訂單編號</th><th className="px-3 py-3 text-left">客戶</th><th className="px-3 py-3 text-left">業務</th><th className="px-3 py-3 text-left">合作夥伴</th><th className="px-3 py-3 text-left">商品</th><th className="px-3 py-3 text-left">服務日期</th><th className="px-3 py-3 text-left">狀態</th><th className="px-3 py-3 text-center">操作</th></tr></thead>
           <tbody>
             {filtered.length===0&&<tr><td colSpan={8} className="p-8 text-center text-gray-400">無符合條件的訂單</td></tr>}
             {filtered.map(order=>{const prod=globalProducts.find(p=>p.id===order.tasks[0]?.productId);const taskVendorIds=[...new Set(order.tasks.map(t=>t.vendorId).filter(Boolean))];const vendorName=taskVendorIds.length>0?taskVendorIds.map(vid=>vendors.find(v=>v.id===vid)?.name||'').filter(Boolean).join(', ')||'未指派':'未指派';return(
@@ -391,7 +392,7 @@ function OrdersPage({orders,setOrders,vendors,globalProducts,caseHandlers,auth,o
                 <td className="px-3 py-3 text-xs">{prod?.name||'—'}{order.tasks.length>1?` 等${order.tasks.length}項`:''}</td>
                 <td className="px-3 py-3 whitespace-nowrap text-gray-500">{order.tasks[0]?.startDate||'—'}</td>
                 <td className="px-3 py-3"><span style={{background:STATUS_MAP[order.status]?.bg||'#f3f4f6',color:STATUS_MAP[order.status]?.color||'#374151'}} className="px-2 py-0.5 rounded text-xs font-medium">{STATUS_MAP[order.status]?.label||order.status}</span></td>
-                <td className="px-3 py-3 text-center text-gray-400">{expandedId===order.id?'▼':'▶'}</td>
+                <td className="px-3 py-3 text-center"><div className="flex gap-1 justify-center"><button onClick={(e)=>{e.stopPropagation();startEdit(order);setExpandedId(order.id);}} className="bg-brand-dark text-white px-2 py-0.5 rounded text-xs">編輯</button><span className="text-gray-400">{expandedId===order.id?'▼':'▶'}</span></div></td>
               </tr>
               {expandedId===order.id&&(<tr><td colSpan={8} className="bg-gray-50 p-4">{editingId===order.id?<OrderEditForm order={editData} setEditData={setEditData} onSave={saveEdit} onCancel={()=>setEditingId(null)} vendors={vendors} globalProducts={globalProducts} caseHandlers={caseHandlers}/>:<OrderDetailView order={order} vendors={vendors} globalProducts={globalProducts} caseHandlers={caseHandlers} onEdit={()=>startEdit(order)} onQuote={()=>setQuotePrintOrder(order)} setOrders={setOrders} orders={orders} onNavigate={onNavigate}/>}</td></tr>)}
               </React.Fragment>
@@ -428,7 +429,11 @@ function OrderDetailView({order,vendors,globalProducts,caseHandlers,onEdit,onQuo
     </div>
   );
 }
-function TaskForm({task,idx,globalProducts,onSelectProduct,onUpdateQty,onUpdateUnitPrice,onUpdateTask,onRemove,canRemove}) {
+function TaskForm({task,idx,globalProducts,onSelectProduct,onUpdateQty,onUpdateUnitPrice,onUpdateTask,onRemove,canRemove,vendors,caseHandlers}) {
+  const prod=globalProducts.find(p=>p.id===task.productId);
+  const autoVid=prod?.vendorId||'';
+  const availVendors=autoVid?vendors.filter(v=>v.id===autoVid):vendors||[];
+  const vendorHandlers=(caseHandlers||[]).filter(ch=>ch.vendorId===task.vendorId);
   return (
     <div className="bg-white p-3 rounded border mb-2">
       <div className="flex justify-between mb-2"><span className="font-medium text-sm">任務 {idx+1}</span>{canRemove&&<button type="button" onClick={onRemove} className="text-red-500 text-xs">移除</button>}</div>
@@ -441,6 +446,8 @@ function TaskForm({task,idx,globalProducts,onSelectProduct,onUpdateQty,onUpdateU
         <Input label="開始時間" type="time" value={task.startTime} onChange={v=>onUpdateTask(task.id,'startTime',v)}/>
         <Input label="結束日期" type="date" value={(task.endDate||'').replace(/\//g,'-')} onChange={v=>onUpdateTask(task.id,'endDate',v.replace(/-/g,'/'))}/>
         <Input label="結束時間" type="time" value={task.endTime} onChange={v=>onUpdateTask(task.id,'endTime',v)}/>
+        {vendors&&<Select label="合作夥伴" value={task.vendorId||''} onChange={v=>onUpdateTask(task.id,'vendorId',v)} options={availVendors.map(v=>({id:v.id,label:v.name}))}/>}
+        {caseHandlers&&<Select label="施工人員" value={task.handlerId||''} onChange={v=>onUpdateTask(task.id,'handlerId',v)} options={vendorHandlers.map(ch=>({id:ch.id,label:ch.name}))}/>}
       </div>
     </div>
   );
@@ -448,21 +455,18 @@ function TaskForm({task,idx,globalProducts,onSelectProduct,onUpdateQty,onUpdateU
 function OrderCreateForm({vendors,globalProducts,caseHandlers,onSave,onCancel,existingCount,auth}) {
   const nextNum=String(existingCount+1).padStart(3,'0');
   const today=new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit'}).replace(/\//g,'/');
-  const [form,setForm]=useState({id:mkId('o'),orderNo:`ORD-2026-${nextNum}`,status:'incoming',createdAt:today,source:'官網',paymentMethod:'信用卡',customerName:'',phone:'',email:'',taxId:'',invoiceTitle:'',city:'台北市',district:'',address:'',vendorId:'',handlerId:'',salesperson:auth?.displayName||'',tasks:[{id:mkTaskId(),sameAsCustomer:true,contactName:'',contactPhone:'',contactCity:'',contactDistrict:'',contactAddress:'',productId:'',qty:1,unitPrice:0,totalPrice:0,startDate:'',startTime:'09:00',endDate:'',endTime:'18:00'}],notes:[]});
+  const [form,setForm]=useState({id:mkId('o'),orderNo:`ORD-2026-${nextNum}`,status:'incoming',createdAt:today,source:'官網',paymentMethod:'信用卡',customerName:'',phone:'',email:'',taxId:'',invoiceTitle:'',city:'台北市',district:'',address:'',vendorId:'',handlerId:'',salesperson:auth?.displayName||'',tasks:[{id:mkTaskId(),sameAsCustomer:true,contactName:'',contactPhone:'',contactCity:'',contactDistrict:'',contactAddress:'',productId:'',qty:1,unitPrice:0,totalPrice:0,startDate:'',startTime:'09:00',endDate:'',endTime:'18:00',vendorId:'',handlerId:''}],notes:[]});
   const setF=(k,v)=>setForm({...form,[k]:v});
   const selectedPids=form.tasks.map(t=>t.productId).filter(Boolean);
   const vendorIdsFromProds=[...new Set(selectedPids.map(pid=>globalProducts.find(p=>p.id===pid)?.vendorId).filter(Boolean))];
   const availableVendors=selectedPids.length>0?vendors.filter(v=>vendorIdsFromProds.includes(v.id)):vendors;
   const vendorHandlers=caseHandlers.filter(ch=>ch.vendorId===form.vendorId);
-  const addTask=()=>setForm({...form,tasks:[...form.tasks,{id:mkTaskId(),sameAsCustomer:true,contactName:'',contactPhone:'',contactCity:'',contactDistrict:'',contactAddress:'',productId:'',qty:1,unitPrice:0,totalPrice:0,startDate:'',startTime:'09:00',endDate:'',endTime:'18:00'}]});
+  const addTask=()=>setForm({...form,tasks:[...form.tasks,{id:mkTaskId(),sameAsCustomer:true,contactName:'',contactPhone:'',contactCity:'',contactDistrict:'',contactAddress:'',productId:'',qty:1,unitPrice:0,totalPrice:0,startDate:'',startTime:'09:00',endDate:'',endTime:'18:00',vendorId:'',handlerId:''}]});
   const removeTask=(tid)=>setForm({...form,tasks:form.tasks.filter(t=>t.id!==tid)});
   const selectProduct=(tid,pid)=>{
     const p=globalProducts.find(x=>x.id===pid);const unitPrice=p?p.retailPrice:0;
-    const newTasks=form.tasks.map(t=>t.id===tid?{...t,productId:pid,unitPrice,totalPrice:unitPrice*(t.qty||1)}:t);
-    const newPids=newTasks.map(t=>t.productId).filter(Boolean);
-    const newVids=[...new Set(newPids.map(pid2=>globalProducts.find(p2=>p2.id===pid2)?.vendorId).filter(Boolean))];
-    const newVid=form.vendorId&&newVids.includes(form.vendorId)?form.vendorId:'';
-    setForm({...form,tasks:newTasks,vendorId:newVid,handlerId:newVid?form.handlerId:''});
+    const newTasks=form.tasks.map(t=>t.id===tid?{...t,productId:pid,unitPrice,totalPrice:unitPrice*(t.qty||1),vendorId:p?.vendorId||t.vendorId||'',handlerId:''}:t);
+    setForm({...form,tasks:newTasks});
   };
   const updateQty=(tid,q)=>setForm({...form,tasks:form.tasks.map(t=>t.id===tid?{...t,qty:q,totalPrice:(t.unitPrice||0)*q}:t)});
   const updateUnitPrice=(tid,up)=>setForm({...form,tasks:form.tasks.map(t=>t.id===tid?{...t,unitPrice:up,totalPrice:up*(t.qty||1)}:t)});
@@ -475,12 +479,8 @@ function OrderCreateForm({vendors,globalProducts,caseHandlers,onSave,onCancel,ex
       <div className="grid grid-cols-3 gap-4"><Input label="地址" value={form.address} onChange={v=>setF('address',v)}/><Input label="統一編號" value={form.taxId} onChange={v=>setF('taxId',v)}/><Input label="發票抬頭" value={form.invoiceTitle} onChange={v=>setF('invoiceTitle',v)}/></div>
       <div>
         <div className="font-medium mb-2 text-sm">任務明細（請先選商品，再選合作夥伴）</div>
-        {form.tasks.map((task,idx)=><TaskForm key={task.id} task={task} idx={idx} globalProducts={globalProducts} onSelectProduct={selectProduct} onUpdateQty={updateQty} onUpdateUnitPrice={updateUnitPrice} onUpdateTask={updateTask} onRemove={()=>removeTask(task.id)} canRemove={form.tasks.length>1}/>)}
+        {form.tasks.map((task,idx)=><TaskForm key={task.id} task={task} idx={idx} globalProducts={globalProducts} vendors={vendors} caseHandlers={caseHandlers} onSelectProduct={selectProduct} onUpdateQty={updateQty} onUpdateUnitPrice={updateUnitPrice} onUpdateTask={updateTask} onRemove={()=>removeTask(task.id)} canRemove={form.tasks.length>1}/>)}
         <button type="button" onClick={addTask} className="text-brand-dark text-sm border border-brand px-3 py-1 rounded hover:bg-brand-light">+ 新增任務</button>
-      </div>
-      <div className={selectedPids.length===0?'opacity-60':''}> 
-        {selectedPids.length===0&&<div className="text-xs text-orange-600 bg-orange-50 border border-orange-200 p-2 rounded mb-2">⚠️ 請先選擇任務商品，合作夥伴選單會依商品自動過濾</div>}
-        <div className="grid grid-cols-2 gap-4"><Select label="合作夥伴（依商品過濾）" value={form.vendorId} onChange={v=>setForm({...form,vendorId:v,handlerId:''})} options={availableVendors.map(v=>({id:v.id,label:v.name}))}/><Select label="施工人員" value={form.handlerId} onChange={v=>setF('handlerId',v)} options={vendorHandlers.map(ch=>({id:ch.id,label:ch.name}))}/></div>
       </div>
       <div className="flex gap-2"><button onClick={()=>onSave(form)} className="bg-green-500 text-white px-4 py-2 rounded text-sm">保存訂單</button><button onClick={onCancel} className="bg-gray-500 text-white px-4 py-2 rounded text-sm">取消</button></div>
     </div>
@@ -491,15 +491,12 @@ function OrderEditForm({order,setEditData,onSave,onCancel,vendors,globalProducts
   const vendorIdsFromProds=[...new Set(selectedPids.map(pid=>globalProducts.find(p=>p.id===pid)?.vendorId).filter(Boolean))];
   const availableVendors=selectedPids.length>0?vendors.filter(v=>vendorIdsFromProds.includes(v.id)):vendors;
   const vendorHandlers=caseHandlers.filter(ch=>ch.vendorId===order.vendorId);
-  const addTask=()=>setEditData({...order,tasks:[...order.tasks,{id:mkTaskId(),sameAsCustomer:true,contactName:'',contactPhone:'',contactCity:'',contactDistrict:'',contactAddress:'',productId:'',qty:1,unitPrice:0,totalPrice:0,startDate:'',startTime:'09:00',endDate:'',endTime:'18:00'}]});
+  const addTask=()=>setEditData({...order,tasks:[...order.tasks,{id:mkTaskId(),sameAsCustomer:true,contactName:'',contactPhone:'',contactCity:'',contactDistrict:'',contactAddress:'',productId:'',qty:1,unitPrice:0,totalPrice:0,startDate:'',startTime:'09:00',endDate:'',endTime:'18:00',vendorId:'',handlerId:''}]});
   const removeTask=(tid)=>setEditData({...order,tasks:order.tasks.filter(t=>t.id!==tid)});
   const selectProduct=(tid,pid)=>{
     const p=globalProducts.find(x=>x.id===pid);const unitPrice=p?p.retailPrice:0;
-    const newTasks=order.tasks.map(t=>t.id===tid?{...t,productId:pid,unitPrice,totalPrice:unitPrice*(t.qty||1)}:t);
-    const newPids=newTasks.map(t=>t.productId).filter(Boolean);
-    const newVids=[...new Set(newPids.map(pid2=>globalProducts.find(p2=>p2.id===pid2)?.vendorId).filter(Boolean))];
-    const newVid=order.vendorId&&newVids.includes(order.vendorId)?order.vendorId:'';
-    setEditData({...order,tasks:newTasks,vendorId:newVid,handlerId:newVid?order.handlerId:''});
+    const newTasks=order.tasks.map(t=>t.id===tid?{...t,productId:pid,unitPrice,totalPrice:unitPrice*(t.qty||1),vendorId:p?.vendorId||t.vendorId||'',handlerId:''}:t);
+    setEditData({...order,tasks:newTasks});
   };
   const updateQty=(tid,q)=>setEditData({...order,tasks:order.tasks.map(t=>t.id===tid?{...t,qty:q,totalPrice:(t.unitPrice||0)*q}:t)});
   const updateUnitPrice=(tid,up)=>setEditData({...order,tasks:order.tasks.map(t=>t.id===tid?{...t,unitPrice:up,totalPrice:up*(t.qty||1)}:t)});
@@ -509,12 +506,10 @@ function OrderEditForm({order,setEditData,onSave,onCancel,vendors,globalProducts
       <div className="grid grid-cols-3 gap-4"><Input label="客戶名" value={order.customerName} onChange={v=>setEditData({...order,customerName:v})}/><Input label="電話" value={order.phone} onChange={v=>setEditData({...order,phone:v})}/><Input label="Email" value={order.email} onChange={v=>setEditData({...order,email:v})}/></div>
       <div>
         <div className="font-medium mb-2 text-sm">任務明細（請先選商品，再選合作夥伴）</div>
-        {order.tasks.map((task,idx)=><TaskForm key={task.id} task={task} idx={idx} globalProducts={globalProducts} onSelectProduct={selectProduct} onUpdateQty={updateQty} onUpdateUnitPrice={updateUnitPrice} onUpdateTask={updateTask} onRemove={()=>removeTask(task.id)} canRemove={order.tasks.length>1}/>)}
+        {order.tasks.map((task,idx)=><TaskForm key={task.id} task={task} idx={idx} globalProducts={globalProducts} vendors={vendors} caseHandlers={caseHandlers} onSelectProduct={selectProduct} onUpdateQty={updateQty} onUpdateUnitPrice={updateUnitPrice} onUpdateTask={updateTask} onRemove={()=>removeTask(task.id)} canRemove={order.tasks.length>1}/>)}
         <button type="button" onClick={addTask} className="text-brand-dark text-sm border border-brand px-3 py-1 rounded hover:bg-brand-light">+ 新增任務</button>
       </div>
-      <div className={selectedPids.length===0?'opacity-60':''}>
-        {selectedPids.length===0&&<div className="text-xs text-orange-600 bg-orange-50 border border-orange-200 p-2 rounded mb-2">⚠️ 請先選擇任務商品</div>}
-        <div className="grid grid-cols-3 gap-4"><Select label="合作夥伴（依商品過濾）" value={order.vendorId} onChange={v=>setEditData({...order,vendorId:v,handlerId:''})} options={availableVendors.map(v=>({id:v.id,label:v.name}))}/><Select label="施工人員" value={order.handlerId} onChange={v=>setEditData({...order,handlerId:v})} options={vendorHandlers.map(ch=>({id:ch.id,label:ch.name}))}/><Select label="狀態" value={order.status} onChange={v=>setEditData({...order,status:v})} options={getAllowedStatuses(order.status).map(s=>({id:s.id,label:s.label}))}/></div>
+      <div className="grid grid-cols-1 gap-4"><Select label="狀態" value={order.status} onChange={v=>setEditData({...order,status:v})} options={getAllowedStatuses(order.status).map(s=>({id:s.id,label:s.label}))}/></div>
       </div>
       <div className="flex gap-2"><button onClick={onSave} className="bg-green-500 text-white px-4 py-2 rounded text-sm">保存</button><button onClick={onCancel} className="bg-gray-500 text-white px-4 py-2 rounded text-sm">取消</button></div>
     </div>
