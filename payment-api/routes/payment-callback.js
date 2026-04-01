@@ -26,6 +26,7 @@ router.post('/', async (req, res) => {
     const paymentDate = params.PaymentDate;
     const paymentType = params.PaymentType;
     const orderId = params.CustomField1;
+    const paymentPurpose = params.CustomField3 || 'full'; // 'deposit', 'final', or 'full'
 
     // 2. 付款成功 (RtnCode === '1')
     if (rtnCode === '1') {
@@ -37,10 +38,14 @@ router.post('/', async (req, res) => {
         paid_at: new Date().toISOString(),
       }).eq('merchant_trade_no', merchantTradeNo);
 
-      // 更新訂單狀態為「已付定金」或自訂狀態
+      // 根據付款類型更新訂單狀態
       if (orderId) {
+        let newStatus = 'deposit_paid';
+        if (paymentPurpose === 'final') newStatus = 'final_paid';
+        else if (paymentPurpose === 'full') newStatus = 'final_paid';
+
         await supabase.from('orders').update({
-          status: 'deposit_paid',
+          status: newStatus,
           payment_method: getPaymentMethodLabel(paymentType),
         }).eq('id', orderId);
       }

@@ -11,7 +11,7 @@ const supabase = createClient(
 // POST /api/create-payment
 router.post('/', async (req, res) => {
   try {
-    const { orderId, orderNo, amount, itemName, customerName, customerEmail, customerPhone } = req.body;
+    const { orderId, orderNo, amount, paymentType, itemName, customerName, customerEmail, customerPhone } = req.body;
 
     if (!orderId || !amount) {
       return res.status(400).json({ error: '缺少必要參數：orderId, amount' });
@@ -34,6 +34,7 @@ router.post('/', async (req, res) => {
       EncryptType: 1,
       CustomField1: orderId,
       CustomField2: orderNo || '',
+      CustomField3: paymentType || 'full',
     };
 
     // 產生 CheckMacValue
